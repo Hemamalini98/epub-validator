@@ -6,7 +6,7 @@
       "function": "validate_internal_xhtml_links",
       "target_path": "OEBPS/xhtml",
       "enabled": true,
-      "file_name_pattern": "*chapter*.xhtml"
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
     },
     {
       "id": "URL002",
@@ -14,7 +14,7 @@
       "function": "validate_external_urls",
       "target_path": "OEBPS/xhtml",
       "enabled": true,
-      "file_name_pattern": "*chapter*.xhtml"
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
     },
     {
       "id": "URL003",
@@ -22,7 +22,7 @@
       "function": "validate_url_text_match",
       "target_path": "OEBPS/xhtml",
       "enabled": true,
-      "file_name_pattern": "*chapter*.xhtml"
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
     },
     {
       "id": "NAV001",
@@ -38,7 +38,7 @@
       "function": "validate_css_w3c",
       "target_path": "OEBPS/xhtml",
       "enabled": true,
-      "file_name_pattern": "*chapter*.xhtml"
+      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
     },
     {
       "id": "CSS002",

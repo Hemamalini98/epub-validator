@@ -290,7 +290,8 @@ def validate_nav_headings(file_details):
             "h3",
             "h4",
             "h5",
-            "h6"
+            "h6",
+            "p"
         ]
         current_element = target_element
         while current_element:
@@ -577,6 +578,11 @@ def validate_epub(epub_folder, folder_name, target_file=None):
             "file_name_pattern",
             "*"
         )
+        file_patterns = (
+            file_pattern
+            if isinstance(file_pattern, list)
+            else [file_pattern]
+        )
 
         # =====================================
         # TARGET FOLDER
@@ -602,9 +608,9 @@ def validate_epub(epub_folder, folder_name, target_file=None):
                     continue
 
                 # File pattern match
-                if not fnmatch.fnmatch(
-                    file,
-                    file_pattern
+                if not any(
+                    fnmatch.fnmatch(file, p)
+                    for p in file_patterns
                 ):
                     continue
 
