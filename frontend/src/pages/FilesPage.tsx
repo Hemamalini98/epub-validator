@@ -5,8 +5,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   FileCode2,
-  ListFilter,
-  ArrowUpDown,
   Play,
   Loader2,
   BookOpen,
@@ -14,6 +12,7 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
+  Download,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/XHTMLCard';
 import { ValidationDetailModal } from '@/components/ValidationDetailModal';
@@ -22,7 +21,7 @@ import { EmptyState } from '@/components/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { getFiles, validateFolder, validateFile } from '@/lib/api';
+import { getFiles, validateFolder, validateFile, exportEpub } from '@/lib/api';
 import { useBookStore } from '@/hooks/useBookStore';
 import { cn, formatDate, titleCase } from '@/lib/utils';
 import type { ValidationApiResponse, XHTMLFile, XHTMLFileStatus } from '@/types';
@@ -237,6 +236,53 @@ export default function FilesPage() {
     [xhtmlFiles, activeFilter, fileIssues], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
+  // ── Export state ────────────────────────────────────────────────────────────
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportErrorMsg, setExportErrorMsg] = useState<string | null>(null);
+  const [exportConfirmMsg, setExportConfirmMsg] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
+  const exportSuccessTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (exportSuccessTimer.current) clearTimeout(exportSuccessTimer.current); }, []);
+
+  function triggerDownload(blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${folderName}.epub`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }
+
+  async function doExport(force: boolean) {
+    setIsExporting(true);
+    setExportErrorMsg(null);
+    try {
+      const result = await exportEpub(
+        folderName,
+        { failed: stats.failed, warnings: stats.warnings, pending: stats.pending },
+        force,
+      );
+      if (result instanceof Blob) {
+        triggerDownload(result);
+        setExportSuccess(true);
+        if (exportSuccessTimer.current) clearTimeout(exportSuccessTimer.current);
+        exportSuccessTimer.current = setTimeout(() => setExportSuccess(false), 4000);
+      } else if (result.status === 'confirm') {
+        setExportConfirmMsg(result.message);
+      }
+    } catch (err) {
+      setExportErrorMsg(err instanceof Error ? err.message : 'Export failed');
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  const handleExport = () => doExport(false);
+  const handleExportConfirmed = () => { setExportConfirmMsg(null); doExport(true); };
+
   // ── Preview modal state ─────────────────────────────────────────────────────
   const [selectedFile, setSelectedFile] = useState<XHTMLFile | null>(null);
   const [modalInitialTab, setModalInitialTab] = useState<ModalTab>('result');
@@ -263,6 +309,61 @@ export default function FilesPage() {
           onClose={() => setSelectedFile(null)}
           onRevalidate={() => handleValidateFile(selectedFile.file_name)}
         />
+      )}
+    </AnimatePresence>
+
+    {/* ── Export error modal ────────────────────────────────────────────── */}
+    <AnimatePresence>
+      {exportErrorMsg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <motion.div
+            className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.18 }}
+          >
+            <div className="flex items-start gap-3 mb-5">
+              <XCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="font-semibold text-foreground">Export Error</h2>
+                <p className="text-sm text-muted-foreground mt-1">{exportErrorMsg}</p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => setExportErrorMsg(null)}>Close</Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+
+    {/* ── Export confirm modal ──────────────────────────────────────────── */}
+    <AnimatePresence>
+      {exportConfirmMsg && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <motion.div
+            className="bg-background rounded-2xl shadow-2xl border border-border w-full max-w-md mx-4 p-6"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.18 }}
+          >
+            <div className="flex items-start gap-3 mb-5">
+              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <h2 className="font-semibold text-foreground">Export with Issues?</h2>
+                <p className="text-sm text-muted-foreground mt-1">{exportConfirmMsg}</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setExportConfirmMsg(null)}>
+                Cancel
+              </Button>
+              <Button onClick={handleExportConfirmed}>Proceed</Button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </AnimatePresence>
     <motion.div
@@ -309,14 +410,6 @@ export default function FilesPage() {
 
           {/* Right: actions */}
           <div className="flex items-center gap-2 shrink-0">
-            {/* <Button variant="outline" size="sm" className="gap-1.5" disabled>
-              <ListFilter className="w-3.5 h-3.5" />
-              Filter
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5" disabled>
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              Sort
-            </Button> */}
             <Button
               size="sm"
               className="gap-2 shadow-sm"
@@ -329,6 +422,20 @@ export default function FilesPage() {
                 <Play className="w-3.5 h-3.5" />
               )}
               {isValidating ? `Validating… ${fmtElapsed(elapsed)}` : 'Validate all'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 shadow-sm"
+              onClick={handleExport}
+              disabled={isExporting || isLoading || isValidating}
+            >
+              {isExporting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5" />
+              )}
+              {isExporting ? 'Exporting…' : 'Export EPUB'}
             </Button>
           </div>
         </div>
@@ -355,6 +462,22 @@ export default function FilesPage() {
             {validationError}
           </div>
         )}
+
+        {/* Export success banner */}
+        <AnimatePresence>
+          {exportSuccess && (
+            <motion.div
+              className="flex items-center gap-2 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-900/40 dark:text-emerald-400"
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.2 }}
+            >
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              EPUB exported successfully — check your downloads.
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* ── 4-stat summary row ─────────────────────────────────────────── */}
         {!isLoading && xhtmlFiles.length > 0 && (

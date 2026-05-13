@@ -7,12 +7,11 @@ import {
   XCircle,
   FileCode2,
   RotateCw,
-  Download,
   Save,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { getFileContent, getPdfPage } from '@/lib/api';
+import { getFileContent, getPdfPage, saveFileContent } from '@/lib/api';
 import type { XHTMLFile, ValidationFileEntry, ValidationIssue } from '@/types';
 
 interface Props {
@@ -179,6 +178,45 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError]     = useState<string | null>(null);
 
+  // ── Source editing ────────────────────────────────────────────────────────────
+  const [editedContent, setEditedContent]   = useState<string | null>(null);
+  const [isSaving, setIsSaving]             = useState(false);
+  const [saveSuccess, setSaveSuccess]       = useState(false);
+  const [saveError, setSaveError]           = useState<string | null>(null);
+  const [showCloseWarning, setShowCloseWarning] = useState(false);
+  const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const lineNumsRef  = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isDirty       = editedContent !== null && editedContent !== sourceContent;
+  const displayContent = editedContent ?? sourceContent ?? '';
+  const lineCount      = displayContent ? displayContent.split('\n').length : 0;
+
+  useEffect(() => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); }, []);
+
+  async function handleSave() {
+    if (!isDirty || isSaving) return;
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await saveFileContent(folderName, filePath, editedContent!);
+      setSourceContent(editedContent);  // update baseline
+      setEditedContent(null);           // mark clean
+      setPreviewUrl(null);              // invalidate cached preview
+      setSaveSuccess(true);
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function handleClose() {
+    if (isDirty) { setShowCloseWarning(true); } else { onClose(); }
+  }
+
   const filePath = useMemo(() => {
     if (entries.length > 0) return entries[0].file_details.relative_path;
     return file.path ?? file.relative_path ?? file.file_name;
@@ -332,7 +370,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        onClick={handleClose}
       />
 
       {/* Panel */}
@@ -367,9 +405,28 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs" disabled>
-              <Save className="w-3.5 h-3.5" />
-              Save
+            {/* Save feedback */}
+            {saveSuccess && (
+              <span className="text-xs text-emerald-600 font-medium flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Saved
+              </span>
+            )}
+            {saveError && (
+              <span className="text-xs text-red-500 font-medium flex items-center gap-1" title={saveError}>
+                <XCircle className="w-3.5 h-3.5" /> Save failed
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              className={cn('gap-1.5 text-xs', isDirty && 'border-primary text-primary')}
+              onClick={handleSave}
+              disabled={!isDirty || isSaving}
+            >
+              {isSaving
+                ? <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                : <Save className="w-3.5 h-3.5" />}
+              {isSaving ? 'Saving…' : isDirty ? 'Save*' : 'Save'}
             </Button>
             <Button
               variant="outline"
@@ -381,11 +438,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
               <RotateCw className={cn('w-3.5 h-3.5', isRevalidating && 'animate-spin')} />
               {isRevalidating ? 'Validating…' : 'Revalidate'}
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 text-xs" disabled>
-              <Download className="w-3.5 h-3.5" />
-              Export Report
-            </Button>
-            <Button variant="ghost" size="icon" onClick={onClose} className="ml-1">
+            <Button variant="ghost" size="icon" onClick={handleClose} className="ml-1">
               <X className="w-4 h-4" />
             </Button>
           </div>
@@ -471,7 +524,10 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                       : 'text-muted-foreground border-transparent hover:text-foreground',
                   )}
                 >
-                  {tab === 'result' ? 'Validation Result' : tab === 'preview' ? 'Preview' : tab === 'source' ? 'Source' : 'PDF'}
+                  {tab === 'result' ? 'Validation Result'
+                    : tab === 'preview' ? 'Preview'
+                    : tab === 'source' ? (<>Source{isDirty && <span className="ml-1 text-amber-500">●</span>}</>)
+                    : 'PDF'}
                 </button>
               ))}
             </div>
@@ -618,21 +674,31 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                       </div>
                     )}
                     {sourceContent !== null && !sourceLoading && (
-                      <div className="relative h-full overflow-auto bg-muted/30 font-mono text-xs">
-                        <table className="w-full border-collapse">
-                          <tbody>
-                            {sourceContent.split('\n').map((line, idx) => (
-                              <tr key={idx} className="hover:bg-muted/60">
-                                <td className="select-none text-right text-muted-foreground/50 px-3 py-0 leading-5 w-10 border-r border-border/40 align-top">
-                                  {idx + 1}
-                                </td>
-                                <td className="px-4 py-0 leading-5 whitespace-pre text-foreground/90 align-top">
-                                  {line || ' '}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                      <div className="flex h-full font-mono text-xs bg-muted/30">
+                        {/* Line numbers — scrolled in sync with textarea */}
+                        <div
+                          ref={lineNumsRef}
+                          className="select-none text-right text-muted-foreground/40 px-3 py-1 border-r border-border/40 overflow-hidden shrink-0 min-w-[2.75rem]"
+                          aria-hidden
+                        >
+                          {Array.from({ length: lineCount }, (_, i) => (
+                            <div key={i} className="leading-5">{i + 1}</div>
+                          ))}
+                        </div>
+                        {/* Editable content */}
+                        <textarea
+                          ref={textareaRef}
+                          value={displayContent}
+                          onChange={(e) => setEditedContent(e.target.value)}
+                          onScroll={(e) => {
+                            if (lineNumsRef.current)
+                              lineNumsRef.current.scrollTop = e.currentTarget.scrollTop;
+                          }}
+                          className="flex-1 resize-none outline-none px-4 py-1 leading-5 bg-transparent text-foreground/90 overflow-auto whitespace-pre"
+                          spellCheck={false}
+                          autoComplete="off"
+                          autoCorrect="off"
+                        />
                       </div>
                     )}
                   </motion.div>
@@ -669,6 +735,47 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
             </div>
           </div>
         </div>
+        {/* ── Unsaved-changes close warning ─────────────────────────────── */}
+        <AnimatePresence>
+          {showCloseWarning && (
+            <motion.div
+              className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-sm rounded-2xl"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              <motion.div
+                className="bg-background rounded-xl shadow-xl border border-border p-6 max-w-sm mx-4 w-full"
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.15 }}
+              >
+                <div className="flex items-start gap-3 mb-5">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-foreground">Unsaved changes</h3>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      You have unsaved edits in the Source tab. Close anyway and lose your changes?
+                    </p>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowCloseWarning(false)}>
+                    Keep editing
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => { setShowCloseWarning(false); onClose(); }}
+                  >
+                    Close anyway
+                  </Button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     </div>
   );
