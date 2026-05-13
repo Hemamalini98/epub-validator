@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   FileCode2,
+  Braces,
   Play,
   Loader2,
   BookOpen,
@@ -113,6 +114,11 @@ export default function FilesPage() {
 
   const xhtmlFiles = useMemo(
     () => (filesData?.files ?? []).filter((f) => f.file_name.toLowerCase().endsWith('.xhtml')),
+    [filesData],
+  );
+
+  const cssFiles = useMemo(
+    () => (filesData?.files ?? []).filter((f) => f.file_name.toLowerCase().endsWith('.css')),
     [filesData],
   );
 
@@ -286,6 +292,7 @@ export default function FilesPage() {
   // ── Preview modal state ─────────────────────────────────────────────────────
   const [selectedFile, setSelectedFile] = useState<XHTMLFile | null>(null);
   const [modalInitialTab, setModalInitialTab] = useState<ModalTab>('result');
+  const [modalAllowedTabs, setModalAllowedTabs] = useState<ModalTab[] | undefined>(undefined);
 
   const selectedEntries = useMemo(() => {
     if (!selectedFile || !validationData) return [];
@@ -306,8 +313,13 @@ export default function FilesPage() {
           entries={selectedEntries}
           isRevalidating={validatingFiles.has(selectedFile.file_name)}
           initialTab={modalInitialTab}
+          allowedTabs={modalAllowedTabs}
           onClose={() => setSelectedFile(null)}
-          onRevalidate={() => handleValidateFile(selectedFile.file_name)}
+          onRevalidate={
+            modalAllowedTabs === undefined || selectedFile.file_name.endsWith('.css')
+              ? () => handleValidateFile(selectedFile.file_name)
+              : undefined
+          }
         />
       )}
     </AnimatePresence>
@@ -583,14 +595,45 @@ export default function FilesPage() {
                     warnings={agg?.warnings ?? 0}
                     isValidating={validatingFiles.has(file.file_name)}
                     onValidate={() => handleValidateFile(file.file_name)}
-                    onOpen={() => { setModalInitialTab('result'); setSelectedFile(file); }}
-                    onPreview={() => { setModalInitialTab('preview'); setSelectedFile(file); }}
+                    onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
+                    onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
                     index={i}
                   />
                 </motion.div>
               );
             })}
           </motion.div>
+
+          {/* ── CSS stylesheets section ────────────────────────────────── */}
+          {cssFiles.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 pt-2">
+                <Braces className="w-4 h-4 text-violet-500" />
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-widest">
+                  CSS Stylesheets
+                </h2>
+                <span className="text-xs text-muted-foreground">({cssFiles.length})</span>
+              </div>
+              <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"
+                variants={containerVariants}
+                initial="hidden"
+                animate="show"
+              >
+                {cssFiles.map((file, i) => (
+                  <motion.div key={`css-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                    <XHTMLCard
+                      file={file}
+                      variant="css"
+                      status="pending"
+                      onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                      index={i}
+                    />
+                  </motion.div>
+                ))}
+              </motion.div>
+            </div>
+          )}
           </>
         )}
       </div>

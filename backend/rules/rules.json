@@ -31,6 +31,22 @@
       "target_path": "",
       "enabled": true,
       "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "CSS001",
+      "name": "Validate CSS Files via W3C Validator",
+      "function": "validate_css_w3c",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*chapter*.xhtml"
+    },
+    {
+      "id": "CSS002",
+      "name": "Validate CSS Files Directly via W3C Validator",
+      "function": "validate_css_w3c",
+      "target_path": "OEBPS/css",
+      "enabled": true,
+      "file_name_pattern": "*.css"
     }
   ]
 }
