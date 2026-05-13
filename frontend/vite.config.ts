@@ -22,6 +22,7 @@ export default defineConfig({
       '/books':    { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/pdf':      { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/validate': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/export':   { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/files': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

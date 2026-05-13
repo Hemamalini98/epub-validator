@@ -55,6 +55,19 @@ export async function getFileContent(folderName: string, filePath: string): Prom
   return data;
 }
 
+export async function saveFileContent(
+  folderName: string,
+  filePath: string,
+  content: string,
+): Promise<void> {
+  const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+  try {
+    await client.put(`/files/${folderName}/${encoded}`, { content });
+  } catch (err) {
+    throw new Error(extractErrorMessage(err));
+  }
+}
+
 export async function validateFile(
   folderName: string,
   fileName: string,
@@ -80,6 +93,42 @@ export async function getPdfPage(
 export async function getBooks(): Promise<Book[]> {
   const { data } = await client.get<Book[]>('/books');
   return data;
+}
+
+export interface ExportConfirmResponse {
+  status: 'confirm';
+  message: string;
+}
+
+export async function exportEpub(
+  folderName: string,
+  stats: { failed: number; warnings: number; pending: number },
+  force = false,
+): Promise<ExportConfirmResponse | Blob> {
+  try {
+    const response = await client.post(
+      `/export/${folderName}`,
+      { ...stats, force },
+      { responseType: 'blob', timeout: 60_000 },
+    );
+    const contentType = (response.headers['content-type'] as string) ?? '';
+    if (contentType.includes('application/json')) {
+      const text = await (response.data as Blob).text();
+      return JSON.parse(text) as ExportConfirmResponse;
+    }
+    return response.data as Blob;
+  } catch (err) {
+    // When responseType is 'blob', axios wraps the error body as a Blob too
+    if (axios.isAxiosError(err) && err.response?.data instanceof Blob) {
+      let parsed: { detail?: string; message?: string } | null = null;
+      try {
+        const text = await err.response.data.text();
+        parsed = JSON.parse(text);
+      } catch { /* not JSON */ }
+      if (parsed) throw new Error(parsed.detail ?? parsed.message ?? 'Export failed');
+    }
+    throw new Error(extractErrorMessage(err));
+  }
 }
 
 /** Derive folder_name from the upload response, falling back to the filename. */
