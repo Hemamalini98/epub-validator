@@ -1,0 +1,36 @@
+{
+  "rules": [
+    {
+      "id": "URL001",
+      "name": "Validate Internal XHTML Links",
+      "function": "validate_internal_xhtml_links",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*chapter*.xhtml"
+    },
+    {
+      "id": "URL002",
+      "name": "Validate External URLs",
+      "function": "validate_external_urls",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*chapter*.xhtml"
+    },
+    {
+      "id": "URL003",
+      "name": "Validate URL Text Match",
+      "function": "validate_url_text_match",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*chapter*.xhtml"
+    },
+    {
+      "id": "NAV001",
+      "name": "Validate NAV TOC Headings",
+      "function": "validate_nav_headings",
+      "target_path": "",
+      "enabled": true,
+      "file_name_pattern": "nav.xhtml"
+    }
+  ]
+}

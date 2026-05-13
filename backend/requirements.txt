@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+beautifulsoup4
+lxml
+requests
+urllib3
+PyMuPDF

@@ -1,0 +1,36 @@
+import json
+import os
+
+BOOKS_FILE = "books.json"
+
+
+def _load() -> list:
+    if not os.path.exists(BOOKS_FILE):
+        return []
+    with open(BOOKS_FILE, "r", encoding="utf-8") as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            return []
+
+
+def _save(books: list) -> None:
+    with open(BOOKS_FILE, "w", encoding="utf-8") as f:
+        json.dump(books, f, indent=2)
+
+
+def upsert_book(book: dict) -> None:
+    books = _load()
+    idx = next(
+        (i for i, b in enumerate(books) if b.get("folder_name") == book.get("folder_name")),
+        None,
+    )
+    if idx is not None:
+        books[idx] = {**books[idx], **book}
+    else:
+        books.insert(0, book)
+    _save(books)
+
+
+def get_all_books() -> list:
+    return _load()
