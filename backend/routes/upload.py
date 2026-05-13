@@ -8,6 +8,9 @@ from services.pdf_service import find_pdf_page, render_pdf_page
 
 router = APIRouter()
 
+@router.get("/health")
+def health_check():
+    return {"status": "healthy"}
 
 @router.get("/books")
 def list_books():
