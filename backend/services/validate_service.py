@@ -2,6 +2,7 @@ import os
 import json
 import re
 import fnmatch
+import posixpath
 import sys
 from bs4 import BeautifulSoup
 import requests
@@ -9,6 +10,258 @@ from urllib3 import Retry
 from requests.adapters import HTTPAdapter
 
 RULES_FILE = "rules/rules.json"
+
+
+# =====================================
+# Vendored pdf-epub-validator adapters (book-scope rules)
+# =====================================
+#
+# The CLI's LinkChecker, NavValidator, and StyleComparator are book-wide
+# checks. We expose them as scope="book" rules so the rule loader calls
+# them once per upload instead of once per file. The adapters convert
+# CLI Issue objects -> the web app's {type, message, category, ...} shape.
+
+from services import book_bundle_service as _bundle
+
+
+_CLI_STATUS_TO_CATEGORY = {
+    "FAIL": "Error",
+    "PARTIAL": "Warning",
+    "PASS": "Info",
+    "SKIP": "Info",
+}
+
+
+def _cli_issue_to_web(issue) -> dict:
+    """Convert a vendored Issue dataclass to the web app's issue dict."""
+    status = getattr(issue.status, "value", str(issue.status))
+    return {
+        "type": (issue.category or issue.name or "issue").lower().replace(" ", "_"),
+        "rule_name": issue.name,
+        "category": _CLI_STATUS_TO_CATEGORY.get(status, "Warning"),
+        "status": status,
+        "file_path": issue.file_path,
+        "line_number": issue.line_number,
+        "snippet": issue.snippet,
+        "message": issue.detail or issue.name,
+        "pdf_context": issue.pdf_context,
+    }
+
+
+def _drop_pass_issues(issues: list) -> list:
+    """Filter out PASS markers so the UI only sees actionable findings."""
+    return [i for i in issues if i.get("status") != "PASS"]
+
+
+def validate_pdf_link_checker(book_details):
+    """URL004 — broken anchors + missing-link patterns (book-scope)."""
+    from vendor.pdf_epub_validator import LinkChecker
+
+    folder = book_details["folder_name"]
+    bundle = _bundle.get_epub_bundle(folder)
+    if not bundle:
+        return {"issues_count": 0, "issues": []}
+    cli_issues = LinkChecker(bundle).run_all()
+    issues = _drop_pass_issues([_cli_issue_to_web(i) for i in cli_issues])
+    return {"issues_count": len(issues), "issues": issues}
+
+
+def validate_nav_full(book_details):
+    """NAV002 — heading coverage + nav hierarchy + EISBN (book-scope)."""
+    from vendor.pdf_epub_validator import NavValidator
+
+    folder = book_details["folder_name"]
+    bundle = _bundle.get_epub_bundle(folder)
+    if not bundle:
+        return {"issues_count": 0, "issues": []}
+    cli_issues = NavValidator(bundle).run_all()
+    issues = _drop_pass_issues([_cli_issue_to_web(i) for i in cli_issues])
+    return {"issues_count": len(issues), "issues": issues}
+
+
+def validate_pdf_style_parity(book_details):
+    """PDF001 — StyleComparator: paragraph splitting, italic/case/colour
+    parity, alignment, indentation, blockquote, images, page count, etc.
+    (book-scope — needs PdfDoc and EpubBundle)."""
+    from vendor.pdf_epub_validator import StyleComparator
+
+    folder = book_details["folder_name"]
+    bundle = _bundle.get_epub_bundle(folder)
+    pdf = _bundle.get_pdf_doc(folder)
+    if not bundle or not pdf:
+        return {"issues_count": 0, "issues": []}
+    cli_issues = StyleComparator(bundle, pdf).run_all()
+    issues = _drop_pass_issues([_cli_issue_to_web(i) for i in cli_issues])
+    return {"issues_count": len(issues), "issues": issues}
+
+
+# =====================================
+# Book-level summary (for the UI's Book Summary card)
+# =====================================
+
+_STATUS_RANK = {"FAIL": 3, "PARTIAL": 2, "PASS": 1, "SKIP": 0}
+
+
+def _is_chapter_path(file_path) -> bool:
+    """A chapter-scope finding has a file_path ending in an XHTML extension."""
+    if not file_path:
+        return False
+    return file_path.lower().endswith((".xhtml", ".html", ".htm"))
+
+
+def _norm_rel(path: str) -> str:
+    return posixpath.normpath(path.replace("\\", "/")).lstrip("./")
+
+
+def _build_asset_to_chapters_index(bundle) -> dict:
+    """Map every CSS/image/etc. asset referenced by an XHTML chapter to the
+    list of chapter rel_paths that reference it.
+
+    Used to route asset-scoped issues (e.g. a CSS rule deprecation) onto the
+    chapters that actually use the asset, so the chapter popup can show them.
+    """
+    if not bundle:
+        return {}
+    index: dict = {}
+    for doc in getattr(bundle, "xhtml_docs", []) or []:
+        chap_rel = _norm_rel(doc.rel_path)
+        chap_dir = posixpath.dirname(chap_rel)
+        soup = doc.soup
+        if soup is None:
+            continue
+        refs: list = []
+        for tag in soup.find_all(["link", "img", "image", "script", "source", "a"]):
+            href = (
+                tag.get("href")
+                or tag.get("src")
+                or tag.get("xlink:href")
+                or ""
+            ).strip()
+            if not href or href.startswith(("http://", "https://", "data:", "mailto:", "#")):
+                continue
+            href = href.split("#", 1)[0]
+            if not href:
+                continue
+            refs.append(href)
+        # @import statements inside inline <style> blocks
+        for style in soup.find_all("style"):
+            text = style.get_text() or ""
+            for m in re.finditer(r"@import\s+(?:url\()?['\"]?([^'\")\s]+)", text):
+                refs.append(m.group(1))
+        for href in refs:
+            resolved = _norm_rel(posixpath.join(chap_dir, href)) if chap_dir else _norm_rel(href)
+            index.setdefault(resolved, []).append(chap_rel)
+    return index
+
+
+def _chapters_for_issue(issue, asset_index: dict | None) -> list:
+    """Return the chapter rel_paths an issue should attach to.
+
+    Empty list ⇒ the issue is global (book-only). Works for both dict-shaped
+    web issues and CLI Issue dataclasses (uses getattr fallback).
+    """
+    fp = issue.get("file_path") if isinstance(issue, dict) else getattr(issue, "file_path", None)
+    if _is_chapter_path(fp):
+        return [fp]
+    if not fp or not asset_index:
+        return []
+    return list(asset_index.get(_norm_rel(fp), []))
+
+
+def _group_chapter_issues(issues, asset_index: dict | None = None):
+    """Bucket book-scope issues by their chapter file_path.
+
+    XHTML-pointed issues attach to that chapter directly. Issues pointing to
+    a non-XHTML asset (CSS, image, etc.) attach to every chapter that
+    references the asset via the asset_index. Issues without a recognizable
+    chapter binding remain book-level only.
+    """
+    by_chapter: dict = {}
+    for issue in issues:
+        for chap in _chapters_for_issue(issue, asset_index):
+            by_chapter.setdefault(chap, []).append(issue)
+    return by_chapter
+
+
+def _run_book_rules_with_pass(folder_name: str) -> list:
+    """Run all book-scope rules, keeping PASS markers (used for the summary)."""
+    from vendor.pdf_epub_validator import LinkChecker, NavValidator, StyleComparator
+
+    bundle = _bundle.get_epub_bundle(folder_name)
+    pdf = _bundle.get_pdf_doc(folder_name)
+    all_issues = []
+    if bundle:
+        all_issues += LinkChecker(bundle).run_all()
+        all_issues += NavValidator(bundle).run_all()
+        if pdf:
+            all_issues += StyleComparator(bundle, pdf).run_all()
+    return all_issues
+
+
+def build_book_summary(folder_name: str) -> dict:
+    """Group all book-scope issues by category, picking the worst status per
+    category. Each row mirrors one line of the CLI's console report."""
+    cli_issues = _run_book_rules_with_pass(folder_name)
+
+    by_category: dict = {}
+    for issue in cli_issues:
+        cat = issue.category or issue.name or "Other"
+        status = getattr(issue.status, "value", str(issue.status))
+        bucket = by_category.setdefault(cat, {
+            "check": cat,
+            "status": "PASS",
+            "count": 0,
+            "fail": 0,
+            "partial": 0,
+            "pass": 0,
+            "detail": "",
+            "samples": [],
+            "_file_counts": {},
+        })
+        bucket["count"] += 1
+        bucket[status.lower()] = bucket.get(status.lower(), 0) + 1
+        if _STATUS_RANK.get(status, 0) > _STATUS_RANK.get(bucket["status"], 0):
+            bucket["status"] = status
+            bucket["detail"] = issue.detail or ""
+        elif not bucket["detail"] and issue.detail:
+            bucket["detail"] = issue.detail
+        if len(bucket["samples"]) < 3 and issue.detail:
+            bucket["samples"].append({
+                "status": status,
+                "file_path": issue.file_path,
+                "detail": issue.detail,
+                "snippet": issue.snippet,
+            })
+        if issue.file_path and status in ("FAIL", "PARTIAL"):
+            bucket["_file_counts"][issue.file_path] = (
+                bucket["_file_counts"].get(issue.file_path, 0) + 1
+            )
+
+    totals = {"PASS": 0, "FAIL": 0, "PARTIAL": 0, "SKIP": 0}
+    for issue in cli_issues:
+        s = getattr(issue.status, "value", str(issue.status))
+        totals[s] = totals.get(s, 0) + 1
+
+    # Sort: FAIL → PARTIAL → PASS, then by count descending within each
+    order = {"FAIL": 0, "PARTIAL": 1, "PASS": 2, "SKIP": 3}
+    rows = sorted(
+        by_category.values(),
+        key=lambda r: (order.get(r["status"], 9), -r["count"], r["check"]),
+    )
+
+    # Flatten per-row file counts into a sorted list (most findings first).
+    for row in rows:
+        counts = row.pop("_file_counts", {})
+        row["files"] = [
+            {"file_path": fp, "count": c}
+            for fp, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        ]
+
+    return {
+        "folder": folder_name,
+        "totals": totals,
+        "rows": rows,
+    }
 
 
 # =====================================
@@ -366,6 +619,10 @@ def validate_epub(epub_folder, folder_name, target_file=None):
         "files": []
     }
 
+    # Resolve asset->chapter references once so book-scope issues pointing to
+    # CSS/images surface under each chapter that uses them.
+    asset_index = _build_asset_to_chapters_index(_bundle.get_epub_bundle(folder_name))
+
     # =====================================
     # LOOP RULES FIRST
     # =====================================
@@ -374,6 +631,75 @@ def validate_epub(epub_folder, folder_name, target_file=None):
         if not rule.get("enabled"):
             continue
         function_name = rule.get("function")
+
+        # =====================================
+        # BOOK-SCOPE RULES — run once per upload
+        # =====================================
+        if rule.get("scope") == "book":
+            current_module = sys.modules[__name__]
+            validation_function = getattr(current_module, function_name, None)
+            if not validation_function:
+                continue
+            book_details = {
+                "folder_name": folder_name,
+                "epub_path": epub_folder,
+            }
+            try:
+                result = validation_function(book_details)
+            except Exception as e:  # noqa: BLE001
+                result = {
+                    "issues_count": 1,
+                    "issues": [{
+                        "type": "rule_error",
+                        "message": f"{function_name} crashed: {e}",
+                        "category": "Error",
+                    }],
+                }
+            report["files"].append({
+                "rule_id": rule["id"],
+                "rule_name": rule["name"],
+                "function": function_name,
+                "target_path": "",
+                "file_pattern": "[book-scope]",
+                "file_details": {
+                    "file_name": "[book-level]",
+                    "full_path": epub_folder,
+                    "relative_path": "",
+                    "folder_name": folder_name,
+                },
+                "result": result,
+            })
+
+            # Also surface chapter-bound findings under each chapter, so the
+            # chapter card lights up and the modal lists the issue inline.
+            # The [book-level] entry above keeps the full aggregate for the
+            # summary card; FilesPage groups by file_name so there's no
+            # double count.
+            for rel_path, chapter_issues in _group_chapter_issues(
+                result.get("issues", []), asset_index
+            ).items():
+                file_name = os.path.basename(rel_path)
+                if target_file and file_name != target_file:
+                    continue
+                report["files"].append({
+                    "rule_id": rule["id"],
+                    "rule_name": rule["name"],
+                    "function": function_name,
+                    "target_path": os.path.dirname(rel_path),
+                    "file_pattern": "[book-scope]",
+                    "file_details": {
+                        "file_name": file_name,
+                        "full_path": os.path.join(epub_folder, rel_path),
+                        "relative_path": rel_path,
+                        "folder_name": folder_name,
+                    },
+                    "result": {
+                        "issues_count": len(chapter_issues),
+                        "issues": chapter_issues,
+                    },
+                })
+            continue
+
         target_path = rule.get(
             "target_path",
             ""
