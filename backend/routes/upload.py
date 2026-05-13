@@ -1,3 +1,4 @@
+import asyncio
 import io
 import zipfile
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
@@ -22,9 +23,11 @@ class ExportRequest(BaseModel):
 class SaveFileRequest(BaseModel):
     content: str
 
+
 @router.get("/health")
 def health_check():
     return {"status": "healthy"}
+
 
 @router.get("/books")
 def list_books():
@@ -33,12 +36,13 @@ def list_books():
 
 @router.post("/upload")
 async def upload_zip(file: UploadFile = File(...)):
-      response = await process_upload(file)
-      return response
+    return await process_upload(file)
+
 
 @router.get("/files/{folder_name}")
-async def list_files(folder_name: str):
+def list_files(folder_name: str):
     return get_extract_files(folder_name)
+
 
 @router.get("/files/{folder_name}/{file_path:path}")
 async def get_file_content(folder_name: str, file_path: str):
@@ -48,7 +52,7 @@ async def get_file_content(folder_name: str, file_path: str):
         raise HTTPException(status_code=403, detail="Access denied")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(target)  # auto-detects MIME type: text/css, image/png, etc.
+    return FileResponse(target)
 
 
 @router.put("/files/{folder_name}/{file_path:path}")
@@ -59,8 +63,10 @@ async def save_file_content(folder_name: str, file_path: str, body: SaveFileRequ
         raise HTTPException(status_code=403, detail="Access denied")
     if not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    target.write_text(body.content, encoding="utf-8")
+    # Write file in thread pool so the event loop stays free
+    await asyncio.to_thread(target.write_text, body.content, encoding="utf-8")
     return {"status": True, "message": "File saved"}
+
 
 @router.get("/pdf/{folder_name}")
 async def get_pdf(folder_name: str):
@@ -75,40 +81,40 @@ async def get_pdf(folder_name: str):
 
 @router.get("/pdf/{folder_name}/page")
 async def get_pdf_page(folder_name: str, file: str = Query(...)):
-    return find_pdf_page(folder_name, file)
+    # PyMuPDF is CPU-bound; run in thread so other requests aren't blocked
+    return await asyncio.to_thread(find_pdf_page, folder_name, file)
 
 
 @router.get("/pdf/{folder_name}/render")
 async def render_pdf_page_endpoint(folder_name: str, page: int = Query(1)):
     try:
-        png_bytes = render_pdf_page(folder_name, page)
+        png_bytes = await asyncio.to_thread(render_pdf_page, folder_name, page)
         return Response(content=png_bytes, media_type="image/png")
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="PDF not found")
 
 
 @router.get("/validate/{filename}")
-async def validate_file(filename: str,file: str = Query(None)):
-
+async def validate_file(filename: str, file: str = Query(None)):
+    # validate_epub does heavy file I/O + network calls — run in thread pool
+    # so every concurrent user gets their own thread and the event loop stays free
     epub_folder = f"uploads/{filename}/extract/epub"
-
-    return validate_epub(
+    return await asyncio.to_thread(
+        validate_epub,
         epub_folder=epub_folder,
         folder_name=filename,
-         target_file=file
+        target_file=file,
     )
 
 
 @router.post("/export/{folder_name}")
 async def export_epub(folder_name: str, body: ExportRequest):
-    # Block export when there are hard errors
     if body.failed > 0:
         raise HTTPException(
             status_code=400,
             detail="There are validation errors. Please fix them before downloading.",
         )
 
-    # Require confirmation when warnings or unvalidated files are present
     if (body.warnings > 0 or body.pending > 0) and not body.force:
         parts: list[str] = []
         if body.warnings > 0:
@@ -124,23 +130,25 @@ async def export_epub(folder_name: str, body: ExportRequest):
     if not epub_dir.is_dir():
         raise HTTPException(status_code=404, detail="EPUB source directory not found.")
 
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        # EPUB spec: mimetype must be the first entry and stored uncompressed
-        mimetype_path = epub_dir / "mimetype"
-        if mimetype_path.is_file():
-            zf.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
-        else:
-            info = zipfile.ZipInfo("mimetype")
-            info.compress_type = zipfile.ZIP_STORED
-            zf.writestr(info, "application/epub+zip")
+    # Build the zip in a thread — file traversal + compression are CPU/IO bound
+    def _build_zip() -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            mimetype_path = epub_dir / "mimetype"
+            if mimetype_path.is_file():
+                zf.write(mimetype_path, "mimetype", compress_type=zipfile.ZIP_STORED)
+            else:
+                info = zipfile.ZipInfo("mimetype")
+                info.compress_type = zipfile.ZIP_STORED
+                zf.writestr(info, "application/epub+zip")
+            for fp in sorted(epub_dir.rglob("*")):
+                if fp.is_file() and fp.name != "mimetype":
+                    zf.write(fp, fp.relative_to(epub_dir).as_posix(), compress_type=zipfile.ZIP_DEFLATED)
+        return buf.getvalue()
 
-        for fp in sorted(epub_dir.rglob("*")):
-            if fp.is_file() and fp.name != "mimetype":
-                zf.write(fp, fp.relative_to(epub_dir).as_posix(), compress_type=zipfile.ZIP_DEFLATED)
-
+    zip_bytes = await asyncio.to_thread(_build_zip)
     return Response(
-        content=buf.getvalue(),
+        content=zip_bytes,
         media_type="application/epub+zip",
         headers={"Content-Disposition": f'attachment; filename="{folder_name}.epub"'},
     )

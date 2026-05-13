@@ -38,7 +38,7 @@
       "function": "validate_css_w3c",
       "target_path": "OEBPS/xhtml",
       "enabled": true,
-      "file_name_pattern": ["*_chapter*.xhtml", "*_ch*.xhtml"]
+      "file_name_pattern": "*.xhtml"
     },
     {
       "id": "CSS002",
