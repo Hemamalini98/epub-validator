@@ -20,8 +20,9 @@ interface Props {
   entries: ValidationFileEntry[];
   isRevalidating?: boolean;
   initialTab?: Tab;
+  allowedTabs?: Tab[];
   onClose: () => void;
-  onRevalidate: () => void;
+  onRevalidate?: () => void;
 }
 
 export type Tab = 'result' | 'preview' | 'source' | 'pdf';
@@ -169,7 +170,8 @@ function resolveRelative(filePath: string, href: string): string {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', onClose, onRevalidate }: Props) {
+export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
+  const visibleTabs: Tab[] = allowedTabs ?? ['result', 'preview', 'source', 'pdf'];
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
 
@@ -428,16 +430,18 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                 : <Save className="w-3.5 h-3.5" />}
               {isSaving ? 'Saving…' : isDirty ? 'Save*' : 'Save'}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={onRevalidate}
-              disabled={isRevalidating}
-            >
-              <RotateCw className={cn('w-3.5 h-3.5', isRevalidating && 'animate-spin')} />
-              {isRevalidating ? 'Validating…' : 'Revalidate'}
-            </Button>
+            {onRevalidate && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 text-xs"
+                onClick={onRevalidate}
+                disabled={isRevalidating}
+              >
+                <RotateCw className={cn('w-3.5 h-3.5', isRevalidating && 'animate-spin')} />
+                {isRevalidating ? 'Validating…' : 'Revalidate'}
+              </Button>
+            )}
             <Button variant="ghost" size="icon" onClick={handleClose} className="ml-1">
               <X className="w-4 h-4" />
             </Button>
@@ -513,7 +517,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
           <div className="flex-1 flex flex-col min-w-0">
             {/* Tabs */}
             <div className="flex items-center gap-0 px-4 pt-3 border-b border-border flex-shrink-0">
-              {(['result', 'preview', 'source', 'pdf'] as Tab[]).map((tab) => (
+              {visibleTabs.map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}

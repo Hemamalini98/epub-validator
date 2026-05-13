@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { FileCode2, Eye, Play, Clock, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
+import { FileCode2, Braces, Eye, Play, Clock, CheckCircle2, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -70,18 +70,20 @@ export const xhtmlCardVariants = {
 
 interface XHTMLCardProps {
   file: XHTMLFile;
+  variant?: 'xhtml' | 'css';
   status: XHTMLFileStatus;
   errors?: number;
   warnings?: number;
   isValidating?: boolean;
-  onValidate: () => void;
-  onPreview: () => void;
+  onValidate?: () => void;
+  onPreview?: () => void;
   onOpen: () => void;
   index?: number;
 }
 
 export function XHTMLCard({
   file,
+  variant = 'xhtml',
   status,
   errors = 0,
   warnings = 0,
@@ -91,6 +93,7 @@ export function XHTMLCard({
   onOpen,
 }: XHTMLCardProps) {
   const filePath = file.path ?? file.relative_path ?? '';
+  const isCss = variant === 'css';
 
   return (
     <motion.div variants={xhtmlCardVariants} whileHover={{ y: -2, transition: { duration: 0.12 } }}>
@@ -98,13 +101,18 @@ export function XHTMLCard({
         <CardContent className="pt-4 flex-1 flex flex-col">
           {/* Icon row + status badge */}
           <div className="flex items-start justify-between mb-3">
-            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
-              <FileCode2 className="w-5 h-5 text-primary" />
+            <div className={cn(
+              'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0',
+              isCss ? 'bg-violet-500/10' : 'bg-primary/10',
+            )}>
+              {isCss
+                ? <Braces className="w-5 h-5 text-violet-500" />
+                : <FileCode2 className="w-5 h-5 text-primary" />}
             </div>
-            <StatusBadge status={status} />
+            {!isCss && <StatusBadge status={status} />}
           </div>
 
-          {/* Filename — clickable to open result tab */}
+          {/* Filename — clickable to open source/result tab */}
           <p
             onClick={onOpen}
             className="text-sm font-semibold text-foreground truncate mb-0.5 cursor-pointer hover:text-primary transition-colors"
@@ -121,46 +129,61 @@ export function XHTMLCard({
             {filePath}
           </p>
 
-          {/* Status text — also clickable */}
+          {/* Status text (XHTML only) / hint (CSS) */}
           <p
-            onClick={onOpen}
+            onClick={!isCss ? onOpen : undefined}
             className={cn(
-              'text-xs mb-4 cursor-pointer',
-              status === 'failed'  ? 'text-red-500'     :
-              status === 'warning' ? 'text-amber-500'   :
-              status === 'passed'  ? 'text-emerald-600' :
+              'text-xs mb-4',
+              !isCss && 'cursor-pointer',
+              !isCss && status === 'failed'  ? 'text-red-500'     :
+              !isCss && status === 'warning' ? 'text-amber-500'   :
+              !isCss && status === 'passed'  ? 'text-emerald-600' :
               'text-muted-foreground',
             )}
           >
-            {statusText(status, errors, warnings)}
+            {isCss ? 'Stylesheet — view & edit source' : statusText(status, errors, warnings)}
           </p>
 
           {/* Buttons */}
           <div className="flex gap-2 mt-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-1 gap-1.5 text-xs"
-              onClick={onPreview}
-              aria-label={`Preview ${file.file_name}`}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              Preview
-            </Button>
-            <Button
-              size="sm"
-              className="flex-1 gap-1.5 text-xs"
-              onClick={onValidate}
-              disabled={isValidating}
-              aria-label={`Validate ${file.file_name}`}
-            >
-              {isValidating ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Play className="w-3.5 h-3.5" />
-              )}
-              {isValidating ? 'Validating…' : 'Validate'}
-            </Button>
+            {isCss ? (
+              <Button
+                size="sm"
+                className="flex-1 gap-1.5 text-xs"
+                onClick={onOpen}
+                aria-label={`Open source for ${file.file_name}`}
+              >
+                <Braces className="w-3.5 h-3.5" />
+                View Source
+              </Button>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 gap-1.5 text-xs"
+                  onClick={onPreview}
+                  aria-label={`Preview ${file.file_name}`}
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Preview
+                </Button>
+                <Button
+                  size="sm"
+                  className="flex-1 gap-1.5 text-xs"
+                  onClick={onValidate}
+                  disabled={isValidating}
+                  aria-label={`Validate ${file.file_name}`}
+                >
+                  {isValidating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5" />
+                  )}
+                  {isValidating ? 'Validating…' : 'Validate'}
+                </Button>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
