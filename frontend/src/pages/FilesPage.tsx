@@ -16,6 +16,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/XHTMLCard';
+import { BookSummaryCard } from '@/components/BookSummaryCard';
 import { ValidationDetailModal } from '@/components/ValidationDetailModal';
 import type { Tab as ModalTab } from '@/components/ValidationDetailModal';
 import { EmptyState } from '@/components/EmptyState';
@@ -354,6 +355,11 @@ export default function FilesPage() {
             <XCircle className="w-4 h-4 flex-shrink-0" />
             {validationError}
           </div>
+        )}
+
+        {/* ── Book-level summary (PDF ↔ EPUB checks) ─────────────────────── */}
+        {!isLoading && xhtmlFiles.length > 0 && (
+          <BookSummaryCard folderName={folderName} />
         )}
 
         {/* ── 4-stat summary row ─────────────────────────────────────────── */}

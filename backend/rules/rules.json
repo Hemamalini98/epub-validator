@@ -5,7 +5,7 @@
       "name": "Validate Internal XHTML Links",
       "function": "validate_internal_xhtml_links",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*chapter*.xhtml"
     },
     {
@@ -13,7 +13,7 @@
       "name": "Validate External URLs",
       "function": "validate_external_urls",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*chapter*.xhtml"
     },
     {
@@ -21,7 +21,7 @@
       "name": "Validate URL Text Match",
       "function": "validate_url_text_match",
       "target_path": "OEBPS/xhtml",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "*chapter*.xhtml"
     },
     {
@@ -29,8 +29,29 @@
       "name": "Validate NAV TOC Headings",
       "function": "validate_nav_headings",
       "target_path": "",
-      "enabled": true,
+      "enabled": false,
       "file_name_pattern": "nav.xhtml"
+    },
+    {
+      "id": "URL004",
+      "name": "PDF-EPUB Link Checker (broken anchors + missing links)",
+      "function": "validate_pdf_link_checker",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "NAV002",
+      "name": "PDF-EPUB Nav Validator (heading coverage + hierarchy + EISBN)",
+      "function": "validate_nav_full",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "PDF001",
+      "name": "PDF-EPUB Style Parity (italic, alignment, indent, images, colour, page count)",
+      "function": "validate_pdf_style_parity",
+      "scope": "book",
+      "enabled": true
     }
   ]
 }

@@ -6,3 +6,6 @@ lxml
 requests
 urllib3
 PyMuPDF
+cssutils
+pdfminer.six
+Pillow

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from services.upload_service import process_upload, get_extract_files, UPLOAD_DIR, EXTRACT_DIR
-from services.validate_service import validate_epub
+from services.validate_service import validate_epub, build_book_summary
 from services.books_service import get_all_books
 from services.pdf_service import find_pdf_page, render_pdf_page
 
@@ -68,3 +68,11 @@ async def validate_file(filename: str,file: str = Query(None)):
         folder_name=filename,
          target_file=file
     )
+
+
+@router.get("/summary/{folder_name}")
+async def get_book_summary(folder_name: str):
+    """Book-level summary for the UI's BookSummaryCard. Runs the three
+    book-scope rules (LinkChecker, NavValidator, StyleComparator) and
+    returns grouped-by-category rows with worst-status-wins per row."""
+    return build_book_summary(folder_name)

@@ -82,6 +82,36 @@ export async function getBooks(): Promise<Book[]> {
   return data;
 }
 
+export interface BookSummaryRow {
+  check: string;
+  status: 'PASS' | 'FAIL' | 'PARTIAL' | 'SKIP';
+  count: number;
+  fail?: number;
+  partial?: number;
+  pass?: number;
+  detail: string;
+  samples: Array<{
+    status: string;
+    file_path: string | null;
+    detail: string | null;
+    snippet: string | null;
+  }>;
+  files?: Array<{ file_path: string; count: number }>;
+}
+
+export interface BookSummary {
+  folder: string;
+  totals: { PASS: number; FAIL: number; PARTIAL: number; SKIP: number };
+  rows: BookSummaryRow[];
+}
+
+export async function getBookSummary(folderName: string): Promise<BookSummary> {
+  const { data } = await client.get<BookSummary>(`/summary/${folderName}`, {
+    timeout: 10 * 60 * 1000,
+  });
+  return data;
+}
+
 /** Derive folder_name from the upload response, falling back to the filename. */
 export function resolveFolderName(response: UploadResponse, file: File): string {
   if (!response.status) return file.name.replace(/\.[^.]+$/, '');

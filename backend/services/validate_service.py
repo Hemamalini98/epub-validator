@@ -200,8 +200,39 @@ def _run_book_rules_with_pass(folder_name: str) -> list:
 
 def build_book_summary(folder_name: str) -> dict:
     """Group all book-scope issues by category, picking the worst status per
-    category. Each row mirrors one line of the CLI's console report."""
-    cli_issues = _run_book_rules_with_pass(folder_name)
+    category. Each row mirrors one line of the CLI's console report.
+
+    Chapter-bound findings (anything with an XHTML file_path, or a non-XHTML
+    asset that some chapter references) are excluded — they live on the
+    per-chapter cards instead. The summary keeps only truly book-wide
+    results, so PASS markers and global FAILs (e.g. missing EISBN, broken
+    cross-anchor links) surface here without the chapter-level noise.
+    """
+    cli_issues_all = _run_book_rules_with_pass(folder_name)
+    asset_index = _build_asset_to_chapters_index(_bundle.get_epub_bundle(folder_name))
+
+    def _is_chapter_actionable(issue) -> bool:
+        # PASS/SKIP markers are book-wide observations even when their
+        # file_path points to where the evidence was found — they belong in
+        # the summary. Only filter FAIL/PARTIAL findings down to those with
+        # no chapter binding.
+        status = getattr(issue.status, "value", str(issue.status))
+        if status not in ("FAIL", "PARTIAL"):
+            return False
+        return bool(_chapters_for_issue(issue, asset_index))
+
+    def _is_truncation_marker(issue) -> bool:
+        # The vendored CLI emits a PARTIAL "Stopped after N findings" issue
+        # whenever a check hits its per-category cap. It carries no signal
+        # the user can act on — the real findings are already on the chapter
+        # cards — so drop it from the summary.
+        detail = (getattr(issue, "detail", "") or "").strip()
+        return detail.startswith("Stopped after ")
+
+    cli_issues = [
+        i for i in cli_issues_all
+        if not _is_chapter_actionable(i) and not _is_truncation_marker(i)
+    ]
 
     by_category: dict = {}
     for issue in cli_issues:

@@ -63,23 +63,23 @@ async def process_upload(file: UploadFile):
 
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
 
-            file_list = zip_ref.namelist()
-
-            epub_found = False
-            pdf_found = False
-
-            for item in file_list:
-
+            # Locate the .epub and .pdf anywhere inside the ZIP, ignoring
+            # macOS resource-fork entries. macOS Finder's "Compress" command
+            # wraps the selection in a folder and adds __MACOSX/._* siblings;
+            # this loop finds the real files regardless of nesting.
+            epub_member = None
+            pdf_member = None
+            for item in zip_ref.namelist():
+                parts = item.replace("\\", "/").split("/")
+                if any(p == "__MACOSX" or p.startswith("._") for p in parts):
+                    continue
                 base_name = os.path.basename(item)
-
                 if base_name == expected_epub:
-                    epub_found = True
+                    epub_member = item
+                elif base_name == expected_pdf:
+                    pdf_member = item
 
-                if base_name == expected_pdf:
-                    pdf_found = True
-
-            # Validate files
-            if not epub_found or not pdf_found:
+            if not epub_member or not pdf_member:
                 return JSONResponse(
                     status_code=400,
                     content={
@@ -91,11 +91,17 @@ async def process_upload(file: UploadFile):
                     }
                 )
 
-            # Create folder
+            # Create folder, then copy ONLY those two members to flat paths
+            # at extract_folder/ — everything downstream expects them there.
             os.makedirs(extract_folder)
-
-            # Extract ZIP
-            zip_ref.extractall(extract_folder)
+            for member, dest_name in (
+                (epub_member, expected_epub),
+                (pdf_member, expected_pdf),
+            ):
+                with zip_ref.open(member) as src, open(
+                    os.path.join(extract_folder, dest_name), "wb"
+                ) as dst:
+                    shutil.copyfileobj(src, dst)
 
         # EPUB extract path
         epub_path = os.path.join(
