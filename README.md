@@ -1,26 +1,73 @@
 # EPUB Validator
 
-A full-stack web application for validating EPUB files. Upload a ZIP containing an EPUB and PDF, inspect every XHTML chapter, run configurable validation rules, and preview the rendered content side-by-side with the source PDF.
+A full-stack web application for validating, inspecting, and editing EPUB files. Upload a ZIP containing an EPUB and PDF, validate every XHTML chapter against configurable rules, edit source files directly in the browser, and export a corrected EPUB — all without leaving the app.
 
 ---
 
 ## Features
 
-- **Upload** — Drag-and-drop or browse a `.zip` file containing an `.epub` and matching `.pdf`
-- **Dashboard** — All uploaded books are persisted server-side (`books.json`) and visible to every user
-- **Per-file validation** — Validate a single chapter or all chapters at once
-- **Validation rules** (configurable via `rules/rules.json`):
-  - **URL001** — Internal XHTML link checker (missing file references)
-  - **URL002** — External URL reachability checker (HTTP HEAD/GET with retry)
-  - **URL003** — URL text vs. href mismatch detector
-  - **NAV001** — Navigation TOC heading text matcher
-- **Detail modal** with four tabs per chapter:
-  - **Validation Result** — Filterable issue list (Error / Warning) with expected vs. actual diff blocks
-  - **Preview** — Rendered XHTML with CSS inlined, images resolved, links disabled
-  - **Source** — Line-numbered raw XHTML viewer
-  - **PDF** — Book PDF opened at the page that matches the chapter heading (detected automatically)
-- **Status filter cards** — Click Pending / Passed / Warnings / Failed to filter the chapter grid
-- **Toast notifications** — Upload errors appear as auto-dismissing notifications
+### Upload
+- Drag-and-drop or browse a `.zip` file containing a matching `.epub` and `.pdf`
+- Duplicate uploads are rejected automatically
+
+### Dashboard
+- All uploaded books persist server-side (`books.json`) and are visible to every user
+- Click any book card to open its chapter list
+
+### Validation
+- **Validate all** chapters at once or run a single chapter on demand
+- Status filter cards (Pending / Passed / Warnings / Failed) narrow the chapter grid instantly
+- Elapsed-time counter shows how long a validation run is taking
+- Validation results survive page refreshes within the session
+
+### Validation Rules (configurable via `rules/rules.json`)
+
+| ID | Name | What it checks |
+|---|---|---|
+| URL001 | Internal XHTML Links | Every `<a href="*.xhtml">` resolves to an existing file |
+| URL002 | External URL Reachability | Every `<a class="url" href="https://…">` returns a 2xx response (HEAD → GET fallback, retry, 10-worker parallel checks) |
+| URL003 | URL Text Match | Displayed link text matches the `href` attribute |
+| NAV001 | NAV TOC Headings | Navigation TOC entry text matches the actual heading in the target chapter |
+| CSS001 | CSS W3C Validation | Linked CSS files are validated against the W3C CSS Validator API |
+
+### Detail Modal (per file — XHTML or CSS)
+
+| Tab | Description |
+|---|---|
+| **Validation Result** | Filterable issue list (Error / Warning) with expected vs. actual diff blocks |
+| **Preview** | Rendered XHTML with CSS inlined, images resolved, links disabled |
+| **Source** | Editable source viewer with synced line numbers — edit and save directly in the browser |
+| **PDF** | Book PDF opened at the page that matches the chapter heading (auto-detected) |
+
+### Source Edit & Save
+- The **Source** tab is fully editable — click into the code and start typing
+- An orange dot (`●`) appears on the Source tab label when there are unsaved changes
+- The **Save** button turns active and labelled `Save*` when edits are pending
+- Saving writes the file back to disk immediately; the **Preview** tab regenerates on next open
+- Closing the modal with unsaved changes shows a confirmation dialog: **Keep editing** or **Close anyway**
+- `Ctrl+S` / `Cmd+S` can be used to save while the source editor is focused
+
+### CSS Stylesheets
+- A **CSS Stylesheets** section appears below the XHTML chapter grid whenever the EPUB contains `.css` files
+- Each CSS card shows a violet `{}` icon and a **View Source** button
+- Clicking opens the same Source tab — fully editable and saveable
+- CSS files are excluded from the validation stat cards (Pending / Passed / Warnings / Failed) since those only track XHTML validation
+
+### Export EPUB
+- The **Export EPUB** button lives in the page header next to **Validate all**
+- Before building the ZIP the frontend sends the current validation summary to the backend:
+  - **Errors present** → blocked with a popup: *"There are validation errors. Please fix them before downloading."*
+  - **Warnings or unvalidated files** → confirmation popup with **Cancel** and **Proceed**
+  - **All passed** → downloads immediately with no prompt
+- The exported EPUB is built from the live files on disk (`uploads/{folder}/extract/epub/`), so any source edits you saved are included automatically
+- The `mimetype` entry is written first and stored uncompressed, satisfying the EPUB specification
+- A green success banner confirms the download; the button shows a spinner while the ZIP is being built
+
+### Multi-User Concurrency
+- All long-running operations (validation, PDF rendering, export) run in a thread pool via `asyncio.to_thread`, keeping the event loop free to serve other users simultaneously
+- External URL checks run in parallel (up to 10 concurrent per file) rather than sequentially
+- `books.json` reads and writes are protected by a `threading.Lock` to prevent corruption during concurrent uploads
+- Default thread pool is 20 workers; tune with the `THREAD_POOL_WORKERS` environment variable
 
 ---
 
@@ -31,7 +78,7 @@ A full-stack web application for validating EPUB files. Upload a ZIP containing 
 |---|---|
 | FastAPI | REST API framework |
 | Uvicorn | ASGI server |
-| BeautifulSoup4 + lxml | XHTML parsing |
+| BeautifulSoup4 + lxml | XHTML / HTML parsing |
 | PyMuPDF | PDF page detection and rendering |
 | requests + urllib3 | External URL validation |
 | python-multipart | File upload handling |
@@ -42,7 +89,7 @@ A full-stack web application for validating EPUB files. Upload a ZIP containing 
 | React 18 + TypeScript | UI framework |
 | Vite 5 | Dev server and bundler |
 | Tailwind CSS | Styling |
-| Framer Motion | Animations |
+| Framer Motion | Animations and transitions |
 | @tanstack/react-query | Server state / data fetching |
 | Axios | HTTP client |
 | Lucide React | Icons |
@@ -52,31 +99,31 @@ A full-stack web application for validating EPUB files. Upload a ZIP containing 
 ## Project Structure
 
 ```
-epubValidator/
+epub-validator/
 ├── backend/
-│   ├── main.py                  # FastAPI app, global exception handler
+│   ├── main.py                  # FastAPI app, lifespan thread-pool setup
 │   ├── requirements.txt
 │   ├── books.json               # Persisted book metadata (auto-created)
-│   ├── uploads/                 # Uploaded ZIPs and extracted files
+│   ├── uploads/                 # Uploaded ZIPs and extracted files (runtime)
 │   ├── routes/
 │   │   └── upload.py            # All API routes
 │   ├── rules/
 │   │   └── rules.json           # Validation rule definitions
 │   └── services/
 │       ├── upload_service.py    # ZIP extraction, book registration
-│       ├── validate_service.py  # Validation logic
-│       ├── books_service.py     # books.json read/write
+│       ├── validate_service.py  # Validation logic + parallel URL checker
+│       ├── books_service.py     # Thread-safe books.json read/write
 │       └── pdf_service.py       # PDF page detection (PyMuPDF)
 └── frontend/
-    ├── vite.config.ts
+    ├── vite.config.ts           # Dev server + API proxy rules
     └── src/
         ├── pages/
         │   ├── Dashboard.tsx    # Book grid
-        │   ├── FilesPage.tsx    # Chapter list + validation
+        │   ├── FilesPage.tsx    # Chapter + CSS file list, validation, export
         │   └── UploadPage.tsx   # Upload flow
         ├── components/
-        │   ├── ValidationDetailModal.tsx  # Per-file detail modal
-        │   ├── XHTMLCard.tsx              # Chapter card
+        │   ├── ValidationDetailModal.tsx  # Per-file detail modal (Result / Preview / Source / PDF)
+        │   ├── XHTMLCard.tsx              # Chapter card (xhtml and css variants)
         │   ├── BookCard.tsx               # Book card
         │   ├── Toaster.tsx                # Toast notification system
         │   └── Sidebar.tsx
@@ -110,6 +157,12 @@ python main.py
 
 The API starts at `http://localhost:8000`.
 
+**Production (multiple workers):**
+```bash
+WORKERS=4 python main.py
+```
+Setting `WORKERS` to more than `1` disables hot-reload and starts that many Uvicorn processes, each capable of handling requests in parallel.
+
 ### 2. Frontend
 
 ```bash
@@ -118,7 +171,7 @@ npm install
 npm run dev
 ```
 
-The app opens at `http://localhost:5173`. The Vite dev server proxies all API calls to the backend.
+The app opens at `http://localhost:5173`. The Vite dev server proxies all API calls to the backend automatically.
 
 ---
 
@@ -126,19 +179,37 @@ The app opens at `http://localhost:5173`. The Vite dev server proxies all API ca
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/health` | Health check |
 | `POST` | `/upload` | Upload a ZIP file |
 | `GET` | `/books` | List all uploaded books |
-| `GET` | `/files/{folder}` | List XHTML files in an uploaded book |
+| `GET` | `/files/{folder}` | List all files in an uploaded book |
 | `GET` | `/files/{folder}/{path}` | Serve any file from the extracted EPUB |
-| `GET` | `/validate/{folder}` | Run all validation rules (optionally `?file=name.xhtml`) |
+| `PUT` | `/files/{folder}/{path}` | Save edited content back to a file |
+| `GET` | `/validate/{folder}` | Run all enabled rules (`?file=name.xhtml` for single file) |
+| `POST` | `/export/{folder}` | Build and download an EPUB from the current files on disk |
 | `GET` | `/pdf/{folder}` | Serve the book PDF |
-| `GET` | `/pdf/{folder}/page?file=name.xhtml` | Detect the PDF page matching a chapter |
+| `GET` | `/pdf/{folder}/page?file=name.xhtml` | Detect the PDF page matching a chapter heading |
 | `GET` | `/pdf/{folder}/render?page=N` | Render a PDF page to PNG |
 
 All error responses use a consistent format:
 ```json
 { "status": false, "message": "..." }
 ```
+
+### Export request body (`POST /export/{folder}`)
+
+```json
+{
+  "failed": 2,
+  "warnings": 1,
+  "pending": 0,
+  "force": false
+}
+```
+
+- If `failed > 0` → HTTP 400 (blocked)
+- If `warnings > 0` or `pending > 0` and `force` is `false` → returns `{ "status": "confirm", "message": "..." }`
+- Otherwise → returns the `.epub` binary
 
 ---
 
@@ -158,7 +229,7 @@ The ZIP name, EPUB name, and PDF name must all share the same stem (e.g. `979889
 
 ## Validation Rules (`rules/rules.json`)
 
-Rules are defined as JSON and loaded at runtime. Each rule specifies which function to call and which files to target:
+Rules are defined as JSON and loaded at runtime. Each rule maps to a Python function in `validate_service.py`:
 
 ```json
 {
@@ -175,18 +246,18 @@ Rules are defined as JSON and loaded at runtime. Each rule specifies which funct
 }
 ```
 
-To disable a rule without deleting it, set `"enabled": false`.
+Set `"enabled": false` to disable a rule without removing it.
 
 ---
 
 ## Adding a New Validation Rule
 
-1. Add a function to `backend/services/validate_service.py`:
+**1.** Add a function to `backend/services/validate_service.py`:
 
 ```python
 def validate_my_rule(file_details):
     issues = []
-    # ... inspection logic ...
+    # ... inspection logic using file_details["full_path"] ...
     issues.append({
         "type": "my_issue_type",
         "message": "Description of the problem",
@@ -195,7 +266,7 @@ def validate_my_rule(file_details):
     return {"issues_count": len(issues), "issues": issues}
 ```
 
-2. Register it in `backend/rules/rules.json`:
+**2.** Register it in `backend/rules/rules.json`:
 
 ```json
 {
@@ -208,4 +279,13 @@ def validate_my_rule(file_details):
 }
 ```
 
-The backend picks up the function by name dynamically — no other changes needed.
+The backend resolves the function by name at runtime — no router changes needed.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `WORKERS` | `1` | Number of Uvicorn worker processes (set > 1 for production; disables hot-reload) |
+| `THREAD_POOL_WORKERS` | `20` | Size of the asyncio default thread pool per worker process |
