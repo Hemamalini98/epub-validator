@@ -112,6 +112,7 @@ interface Props {
 
 export function BookSummaryCard({ folderName }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<Status | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['summary', folderName],
@@ -148,8 +149,11 @@ export function BookSummaryCard({ folderName }: Props) {
   const { totals, rows } = data;
   const failingRows = rows.filter((r) => r.status === 'FAIL' || r.status === 'PARTIAL');
   const passingRows = rows.filter((r) => r.status === 'PASS');
-  const visibleRows = expanded ? rows : failingRows.slice(0, 6);
+  const filteredRows = statusFilter ? rows.filter((r) => r.status === statusFilter) : null;
+  const defaultRows = expanded ? rows : failingRows.slice(0, 6);
+  const visibleRows = filteredRows ?? defaultRows;
   const hiddenCount = rows.length - visibleRows.length;
+  const toggleFilter = (s: Status) => setStatusFilter((prev) => (prev === s ? null : s));
 
   return (
     <Card>
@@ -163,9 +167,27 @@ export function BookSummaryCard({ folderName }: Props) {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <TotalPill label="PASS" count={totals.PASS} status="PASS" />
-            <TotalPill label="PARTIAL" count={totals.PARTIAL} status="PARTIAL" />
-            <TotalPill label="FAIL" count={totals.FAIL} status="FAIL" />
+            <TotalPill
+              label="PASS"
+              count={totals.PASS}
+              status="PASS"
+              isActive={statusFilter === 'PASS'}
+              onClick={() => toggleFilter('PASS')}
+            />
+            <TotalPill
+              label="PARTIAL"
+              count={totals.PARTIAL}
+              status="PARTIAL"
+              isActive={statusFilter === 'PARTIAL'}
+              onClick={() => toggleFilter('PARTIAL')}
+            />
+            <TotalPill
+              label="FAIL"
+              count={totals.FAIL}
+              status="FAIL"
+              isActive={statusFilter === 'FAIL'}
+              onClick={() => toggleFilter('FAIL')}
+            />
             <Button
               size="icon"
               variant="ghost"
@@ -190,12 +212,30 @@ export function BookSummaryCard({ folderName }: Props) {
           <div>Result</div>
         </div>
 
+        {/* Active filter indicator */}
+        {statusFilter && (
+          <div className="flex items-center justify-between text-xs text-muted-foreground px-3 pb-2">
+            <span>
+              Showing <span className="font-medium text-foreground">{visibleRows.length}</span>{' '}
+              {statusFilter.toLowerCase()} check{visibleRows.length === 1 ? '' : 's'}
+            </span>
+            <button
+              onClick={() => setStatusFilter(null)}
+              className="text-primary hover:underline"
+            >
+              Clear filter
+            </button>
+          </div>
+        )}
+
         {/* Rows */}
         <AnimatePresence initial={false}>
           <motion.div layout className="divide-y divide-border/40">
             {visibleRows.length === 0 && (
               <div className="py-6 text-center text-sm text-muted-foreground">
-                No failures or warnings detected.
+                {statusFilter
+                  ? `No ${statusFilter.toLowerCase()} checks.`
+                  : 'No failures or warnings detected.'}
               </div>
             )}
             {visibleRows.map((row) => (
@@ -213,8 +253,8 @@ export function BookSummaryCard({ folderName }: Props) {
           </motion.div>
         </AnimatePresence>
 
-        {/* Toggle */}
-        {(hiddenCount > 0 || expanded) && (
+        {/* Toggle (only when no filter is active) */}
+        {!statusFilter && (hiddenCount > 0 || expanded) && (
           <div className="pt-3 mt-1 border-t border-border/50">
             <button
               onClick={() => setExpanded((v) => !v)}
@@ -243,23 +283,34 @@ function TotalPill({
   label,
   count,
   status,
+  isActive,
+  onClick,
 }: {
   label: string;
   count: number;
   status: Status;
+  isActive?: boolean;
+  onClick?: () => void;
 }) {
   const s = statusStyles[status];
   return (
-    <span
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick || count === 0}
+      aria-pressed={!!isActive}
       className={cn(
-        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold',
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all',
         s.bg,
         s.text,
         s.ring,
+        onClick && count > 0 && 'cursor-pointer hover:brightness-95 dark:hover:brightness-110',
+        isActive && 'ring-2 ring-offset-1 ring-offset-background',
+        (!onClick || count === 0) && 'cursor-default opacity-70',
       )}
     >
       <span className="tabular-nums">{count}</span>
       <span className="opacity-75">{label}</span>
-    </span>
+    </button>
   );
 }

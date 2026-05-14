@@ -202,24 +202,12 @@ def build_book_summary(folder_name: str) -> dict:
     """Group all book-scope issues by category, picking the worst status per
     category. Each row mirrors one line of the CLI's console report.
 
-    Chapter-bound findings (anything with an XHTML file_path, or a non-XHTML
-    asset that some chapter references) are excluded — they live on the
-    per-chapter cards instead. The summary keeps only truly book-wide
-    results, so PASS markers and global FAILs (e.g. missing EISBN, broken
-    cross-anchor links) surface here without the chapter-level noise.
+    Chapter-bound findings still aggregate into their category row here so
+    the summary reflects FAIL/PARTIAL state; per-chapter detail also lives
+    on the chapter cards. Truncation markers are dropped — they carry no
+    actionable signal.
     """
     cli_issues_all = _run_book_rules_with_pass(folder_name)
-    asset_index = _build_asset_to_chapters_index(_bundle.get_epub_bundle(folder_name))
-
-    def _is_chapter_actionable(issue) -> bool:
-        # PASS/SKIP markers are book-wide observations even when their
-        # file_path points to where the evidence was found — they belong in
-        # the summary. Only filter FAIL/PARTIAL findings down to those with
-        # no chapter binding.
-        status = getattr(issue.status, "value", str(issue.status))
-        if status not in ("FAIL", "PARTIAL"):
-            return False
-        return bool(_chapters_for_issue(issue, asset_index))
 
     def _is_truncation_marker(issue) -> bool:
         # The vendored CLI emits a PARTIAL "Stopped after N findings" issue
@@ -229,10 +217,7 @@ def build_book_summary(folder_name: str) -> dict:
         detail = (getattr(issue, "detail", "") or "").strip()
         return detail.startswith("Stopped after ")
 
-    cli_issues = [
-        i for i in cli_issues_all
-        if not _is_chapter_actionable(i) and not _is_truncation_marker(i)
-    ]
+    cli_issues = [i for i in cli_issues_all if not _is_truncation_marker(i)]
 
     by_category: dict = {}
     for issue in cli_issues:
@@ -268,17 +253,18 @@ def build_book_summary(folder_name: str) -> dict:
                 bucket["_file_counts"].get(issue.file_path, 0) + 1
             )
 
-    totals = {"PASS": 0, "FAIL": 0, "PARTIAL": 0, "SKIP": 0}
-    for issue in cli_issues:
-        s = getattr(issue.status, "value", str(issue.status))
-        totals[s] = totals.get(s, 0) + 1
-
     # Sort: FAIL → PARTIAL → PASS, then by count descending within each
     order = {"FAIL": 0, "PARTIAL": 1, "PASS": 2, "SKIP": 3}
     rows = sorted(
         by_category.values(),
         key=lambda r: (order.get(r["status"], 9), -r["count"], r["check"]),
     )
+
+    # Totals reflect category-level outcomes (one tally per check) so the
+    # header pills match the row list — not the raw per-finding count.
+    totals = {"PASS": 0, "FAIL": 0, "PARTIAL": 0, "SKIP": 0}
+    for row in rows:
+        totals[row["status"]] = totals.get(row["status"], 0) + 1
 
     # Flatten per-row file counts into a sorted list (most findings first).
     for row in rows:
