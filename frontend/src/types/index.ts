@@ -60,6 +60,9 @@ export interface ValidationIssue {
   expected_text?: string;
   actual_text?: string;
   status_code?: number;
+  line_number?: number | null;
+  snippet?: string | null;
+  file_path?: string | null;
   [key: string]: unknown;
 }
 

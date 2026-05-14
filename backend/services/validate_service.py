@@ -31,14 +31,30 @@ _CLI_STATUS_TO_CATEGORY = {
     "SKIP": "Info",
 }
 
+# Issue categories that should surface as Warning even when the CLI marks
+# them FAIL. These are layout/styling parity findings, not hard correctness
+# bugs — they deserve attention but shouldn't fail a chapter outright.
+_WARNING_OVERRIDES = {
+    "body image size / centering",
+    "hanging alignment missing",
+    "incorrect alignment",
+    "incorrect level in nav",
+    "cover image size incorrect",
+    "link missing",
+}
+
 
 def _cli_issue_to_web(issue) -> dict:
     """Convert a vendored Issue dataclass to the web app's issue dict."""
     status = getattr(issue.status, "value", str(issue.status))
+    category = _CLI_STATUS_TO_CATEGORY.get(status, "Warning")
+    issue_category_name = (issue.category or issue.name or "").strip().lower()
+    if category == "Error" and issue_category_name in _WARNING_OVERRIDES:
+        category = "Warning"
     return {
         "type": (issue.category or issue.name or "issue").lower().replace(" ", "_"),
         "rule_name": issue.name,
-        "category": _CLI_STATUS_TO_CATEGORY.get(status, "Warning"),
+        "category": category,
         "status": status,
         "file_path": issue.file_path,
         "line_number": issue.line_number,

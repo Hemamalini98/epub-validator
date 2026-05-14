@@ -56,7 +56,7 @@ function statusText(
   warnings: number,
 ): string {
   if (status === 'pending')  return 'Awaiting validation';
-  if (status === 'passed')   return 'No issues found';
+  if (status === 'passed')   return 'No issue found (passes)';
   if (status === 'failed')   return `${errors} error${errors !== 1 ? 's' : ''}`;
   return `${warnings} warning${warnings !== 1 ? 's' : ''}`;
 }

@@ -29,21 +29,33 @@ export type Tab = 'result' | 'preview' | 'source' | 'pdf';
 
 type DisplayIssue = ValidationIssue & { _ruleName: string };
 
-// ─── Rule row in left sidebar ────────────────────────────────────────────────
+type IssueGroup = {
+  type: string;
+  label: string;
+  count: number;
+  errors: number;
+  warnings: number;
+};
 
-function RuleRow({
-  entry,
+function formatIssueType(t: string): string {
+  return t
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+// ─── Issue-type row in left sidebar ──────────────────────────────────────────
+
+function GroupRow({
+  group,
   isSelected,
   onClick,
 }: {
-  entry: ValidationFileEntry;
+  group: IssueGroup;
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const errors   = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
-  const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length;
-  const passed   = entry.result.issues.length === 0;
-
   return (
     <button
       onClick={onClick}
@@ -57,24 +69,20 @@ function RuleRow({
           'text-xs font-medium truncate',
           isSelected ? 'text-primary' : 'text-foreground',
         )}>
-          {entry.rule_name}
+          {group.label}
         </span>
-        {passed ? (
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-        ) : errors > 0 ? (
+        {group.errors > 0 ? (
           <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
         ) : (
           <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
         )}
       </div>
-      {!passed && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
-          {[
-            errors   > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
-            warnings > 0 && `${warnings} warning${warnings !== 1 ? 's' : ''}`,
-          ].filter(Boolean).join(' · ')}
-        </p>
-      )}
+      <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
+        {[
+          group.errors   > 0 && `${group.errors} error${group.errors !== 1 ? 's' : ''}`,
+          group.warnings > 0 && `${group.warnings} warning${group.warnings !== 1 ? 's' : ''}`,
+        ].filter(Boolean).join(' · ')}
+      </p>
     </button>
   );
 }
@@ -84,6 +92,7 @@ function RuleRow({
 function IssueRow({ issue }: { issue: DisplayIssue }) {
   const isError = (issue.category ?? '').toLowerCase() === 'error';
   const hasDiff = issue.expected_text || issue.actual_text;
+  const snippetParts = issue.snippet ? issue.snippet.split(' ⏎ ') : null;
 
   return (
     <div className={cn(
@@ -105,12 +114,30 @@ function IssueRow({ issue }: { issue: DisplayIssue }) {
             isError ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400',
           )}>
             {issue.type}
+            {typeof issue.line_number === 'number' && (
+              <span className="ml-1.5 font-mono text-[10px] opacity-70">line {issue.line_number}</span>
+            )}
           </p>
           {issue.message && (
             <p className="text-xs text-muted-foreground mt-0.5 break-words">{issue.message}</p>
           )}
           {issue.href && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
+          )}
+          {snippetParts && !hasDiff && (
+            <div className="mt-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-2 text-xs font-mono text-foreground/80 leading-relaxed">
+              {snippetParts.length === 2 ? (
+                <>
+                  <span className="break-words">…{snippetParts[0].trim()}</span>
+                  <span className="block my-0.5 text-[10px] uppercase tracking-widest text-muted-foreground/70 font-sans">
+                    ↵ paragraph break
+                  </span>
+                  <span className="break-words">{snippetParts[1].trim()}…</span>
+                </>
+              ) : (
+                <span className="break-words">…{issue.snippet}…</span>
+              )}
+            </div>
           )}
           <p className="text-[10px] text-muted-foreground mt-1 opacity-60">{issue._ruleName}</p>
         </div>
@@ -172,7 +199,7 @@ function resolveRelative(filePath: string, href: string): string {
 
 export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', onClose, onRevalidate }: Props) {
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
-  const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
+  const [selectedType, setSelectedType] = useState<string | null>(null);
 
   // ── Source fetch ─────────────────────────────────────────────────────────────
   const [sourceContent, setSourceContent] = useState<string | null>(null);
@@ -302,15 +329,30 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   const toggleIssueFilter = (f: 'error' | 'warning') =>
     setIssueFilter((prev) => (prev === f ? 'all' : f));
 
-  const allIssues = useMemo<DisplayIssue[]>(() => {
-    if (selectedRuleId) {
-      const entry = entries.find(e => e.rule_id === selectedRuleId);
-      return (entry?.result.issues ?? []).map(i => ({ ...i, _ruleName: entry?.rule_name ?? '' }));
+  const flatIssues = useMemo<DisplayIssue[]>(
+    () => entries.flatMap(e => e.result.issues.map(i => ({ ...i, _ruleName: e.rule_name }))),
+    [entries],
+  );
+
+  const issueGroups = useMemo<IssueGroup[]>(() => {
+    const m = new Map<string, IssueGroup>();
+    for (const issue of flatIssues) {
+      const key = issue.type || 'unknown';
+      const g = m.get(key) ?? { type: key, label: formatIssueType(key), count: 0, errors: 0, warnings: 0 };
+      g.count++;
+      if ((issue.category ?? '').toLowerCase() === 'error') g.errors++;
+      else g.warnings++;
+      m.set(key, g);
     }
-    return entries.flatMap(e =>
-      e.result.issues.map(i => ({ ...i, _ruleName: e.rule_name })),
+    return Array.from(m.values()).sort(
+      (a, b) => b.count - a.count || a.label.localeCompare(b.label),
     );
-  }, [entries, selectedRuleId]);
+  }, [flatIssues]);
+
+  const allIssues = useMemo<DisplayIssue[]>(() => {
+    if (selectedType) return flatIssues.filter(i => (i.type || 'unknown') === selectedType);
+    return flatIssues;
+  }, [flatIssues, selectedType]);
 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
     if (issueFilter === 'error')   return allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error');
@@ -398,17 +440,17 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
           <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
             <div className="px-3 pt-3 pb-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
-                Validation Rules
+                Issue Types
               </p>
             </div>
 
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
               {/* All-issues shortcut */}
               <button
-                onClick={() => setSelectedRule(null)}
+                onClick={() => setSelectedType(null)}
                 className={cn(
                   'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-medium',
-                  selectedRuleId === null
+                  selectedType === null
                     ? 'bg-primary/10 text-primary'
                     : 'hover:bg-muted text-muted-foreground',
                 )}
@@ -419,17 +461,17 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                 )}
               </button>
 
-              {entries.length === 0 ? (
+              {issueGroups.length === 0 ? (
                 <p className="px-3 py-2 text-xs text-muted-foreground/60 italic">
-                  No validation data yet.
+                  {entries.length === 0 ? 'No validation data yet.' : 'No issues found.'}
                 </p>
               ) : (
-                entries.map((entry) => (
-                  <RuleRow
-                    key={entry.rule_id}
-                    entry={entry}
-                    isSelected={selectedRuleId === entry.rule_id}
-                    onClick={() => setSelectedRule(entry.rule_id)}
+                issueGroups.map((g) => (
+                  <GroupRow
+                    key={g.type}
+                    group={g}
+                    isSelected={selectedType === g.type}
+                    onClick={() => setSelectedType(g.type)}
                   />
                 ))
               )}
@@ -542,7 +584,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {issueFilter === 'all'
-                            ? `No issues found${selectedRuleId ? ' for this rule' : ''}.`
+                            ? `No issues found${selectedType ? ' for this issue type' : ''}.`
                             : 'Try a different filter.'}
                         </p>
                       </div>

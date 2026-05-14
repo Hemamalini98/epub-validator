@@ -220,9 +220,15 @@ class PdfParser:
                 for sp in ln.spans:
                     if sp.color != 0:
                         colors.add(sp.color)
-                    # Identify italic and bold from flags or font name.
-                    italic = bool(sp.flags & _FLAG_ITALIC) or "italic" in sp.font.lower() or "oblique" in sp.font.lower()
-                    bold = bool(sp.flags & _FLAG_BOLD) or "bold" in sp.font.lower()
+                    # Identify italic and bold. The italic FontFlags bit and
+                    # the "italic"/"oblique" font-name substring are both
+                    # individually noisy — a font can carry one without
+                    # visually rendering italic. Require BOTH to agree.
+                    font_lower = sp.font.lower()
+                    flag_italic = bool(sp.flags & _FLAG_ITALIC)
+                    name_italic = "italic" in font_lower or "oblique" in font_lower
+                    italic = flag_italic and name_italic
+                    bold = bool(sp.flags & _FLAG_BOLD) or "bold" in font_lower
                     if italic or bold:
                         for w in _WORD_RE.findall(sp.text):
                             if italic:

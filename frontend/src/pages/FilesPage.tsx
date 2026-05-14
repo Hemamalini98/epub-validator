@@ -16,7 +16,6 @@ import {
   Clock,
 } from 'lucide-react';
 import { XHTMLCard, xhtmlCardVariants } from '@/components/XHTMLCard';
-import { BookSummaryCard } from '@/components/BookSummaryCard';
 import { ValidationDetailModal } from '@/components/ValidationDetailModal';
 import type { Tab as ModalTab } from '@/components/ValidationDetailModal';
 import { EmptyState } from '@/components/EmptyState';
@@ -122,6 +121,7 @@ export default function FilesPage() {
   const [validationData, setValidationData] = useState<ValidationApiResponse | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [hasValidatedAll, setHasValidatedAll] = useState(false);
 
   // Elapsed-time counter while validation runs
   const [elapsed, setElapsed] = useState(0);
@@ -158,6 +158,7 @@ export default function FilesPage() {
     try {
       const result = await validateFolder(folderName);
       setValidationData(result);
+      setHasValidatedAll(true);
     } catch {
       setValidationError('Validation request failed. Is the backend running?');
     } finally {
@@ -205,7 +206,7 @@ export default function FilesPage() {
 
   const getFileStatus = (fileName: string): XHTMLFileStatus => {
     const agg = fileIssues.get(fileName);
-    if (agg === undefined) return 'pending';          // not yet validated
+    if (agg === undefined) return hasValidatedAll ? 'passed' : 'pending';
     if (agg.errors === 0 && agg.warnings === 0) return 'passed';
     if (agg.errors > 0) return 'failed';
     return 'warning';
@@ -217,13 +218,17 @@ export default function FilesPage() {
     let passed = 0, warnings = 0, failed = 0, pending = 0;
     for (const f of xhtmlFiles) {
       const agg = fileIssues.get(f.file_name);
-      if (agg === undefined) { pending++; continue; }
+      if (agg === undefined) {
+        if (hasValidatedAll) passed++;
+        else pending++;
+        continue;
+      }
       if (agg.errors === 0 && agg.warnings === 0) passed++;
       else if (agg.errors > 0) failed++;
       else warnings++;
     }
     return { total, passed, warnings, failed, pending };
-  }, [xhtmlFiles, fileIssues]);
+  }, [xhtmlFiles, fileIssues, hasValidatedAll]);
 
   const hasValidated = validationData !== null;
 
@@ -355,11 +360,6 @@ export default function FilesPage() {
             <XCircle className="w-4 h-4 flex-shrink-0" />
             {validationError}
           </div>
-        )}
-
-        {/* ── Book-level summary (PDF ↔ EPUB checks) ─────────────────────── */}
-        {!isLoading && xhtmlFiles.length > 0 && (
-          <BookSummaryCard folderName={folderName} />
         )}
 
         {/* ── 4-stat summary row ─────────────────────────────────────────── */}
