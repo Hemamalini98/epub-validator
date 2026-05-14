@@ -1,7 +1,12 @@
 import json
 import os
+import threading
 
 BOOKS_FILE = "books.json"
+
+# Single lock shared across all threads in a process.
+# Prevents concurrent uploads from producing a torn books.json.
+_lock = threading.Lock()
 
 
 def _load() -> list:
@@ -20,17 +25,19 @@ def _save(books: list) -> None:
 
 
 def upsert_book(book: dict) -> None:
-    books = _load()
-    idx = next(
-        (i for i, b in enumerate(books) if b.get("folder_name") == book.get("folder_name")),
-        None,
-    )
-    if idx is not None:
-        books[idx] = {**books[idx], **book}
-    else:
-        books.insert(0, book)
-    _save(books)
+    with _lock:
+        books = _load()
+        idx = next(
+            (i for i, b in enumerate(books) if b.get("folder_name") == book.get("folder_name")),
+            None,
+        )
+        if idx is not None:
+            books[idx] = {**books[idx], **book}
+        else:
+            books.insert(0, book)
+        _save(books)
 
 
 def get_all_books() -> list:
-    return _load()
+    with _lock:
+        return _load()

@@ -3,6 +3,7 @@ import json
 import re
 import fnmatch
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 import requests
 import urllib3
@@ -58,137 +59,92 @@ def validate_internal_xhtml_links(file_details):
         "issues": issues
     }
 
-def validate_external_urls(file_details):
+_URL_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+}
 
-    file_path = file_details["full_path"]
-    issues = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        soup = BeautifulSoup(f.read(), "html.parser")
-    links = soup.find_all("a", href=True, class_="url")
-    # =====================================
-    # REQUEST HEADERS
-    # =====================================
-    REQUEST_HEADERS = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0 Safari/537.36"
-        )
-    }
-    # =====================================
-    # SESSION + RETRY
-    # =====================================
+
+def _make_session() -> requests.Session:
     session = requests.Session()
     retry = Retry(
-        total=3,
-        connect=3,
-        read=3,
-        backoff_factor=2,
-        status_forcelist=[
-            429,
-            500,
-            502,
-            503,
-            504
-        ],
+        total=3, connect=3, read=3, backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET"],
     )
-    adapter = HTTPAdapter(
-        max_retries=retry
-    )
+    adapter = HTTPAdapter(max_retries=retry)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    # =====================================
-    # LOOP LINKS
-    # =====================================
-    for link in links:
-        href = link["href"].strip()
-        if not (
-            href.startswith("http://")
-            or href.startswith("https://")
-        ):
-            continue
-        try:
-            # =====================================
-            # TRY HEAD
-            # =====================================
-            response = session.head(
-                href,
-                timeout=30,
-                allow_redirects=True,
-                verify=False,
-                headers=REQUEST_HEADERS,
-            )
-            status_code = response.status_code
+    return session
 
-            # =====================================
-            # HEAD BLOCKED -> TRY GET
-            # =====================================
-            if status_code in [403, 405]:
 
-                response = session.get(
-                    href,
-                    timeout=30,
-                    allow_redirects=True,
-                    verify=False,
-                    headers=REQUEST_HEADERS,
-                    stream=True
-                )
-                status_code = response.status_code
-            # =====================================
-            # SUCCESS
-            # =====================================
-            if status_code < 400:
-                continue
-            # =====================================
-            # ISSUE CATEGORY
-            # =====================================
-            severity = "warning"
-            message = "External URL issue"
-            if status_code == 404:
-                severity = "error"
-                message = "URL not found"
-            elif status_code == 403:
-                severity = "warning"
-                message = "Access forbidden or bot blocked"
-            elif status_code == 405:
-                severity = "warning"
-                message = "Method not allowed"
-            elif status_code >= 500:
-                severity = "warning"
-                message = "Server error"
-            issues.append({
-                "type": "external_url_issue",
-                "href": href,
-                "status_code": status_code,
-                "category": severity,
-                "message": message +'.Status code - '+ str(status_code)
-            })
-        except requests.exceptions.Timeout:
-            issues.append({
-                "type": "external_url_issue",
-                "href": href,
-                "category": "warning",
-                "message": "Request timeout"
-            })
-        except requests.exceptions.ConnectionError:
-            issues.append({
-                "type": "external_url_issue",
-                "href": href,
-                "category": "error",
-                "message": "Connection error"
-            })
-        except Exception as e:
-            issues.append({
-                "type": "external_url_issue",
-                "href": href,
-                "category": "error",
-                "message": str(e)
-            })
-    return {
-        "issues_count": len(issues),
-        "issues": issues
-    }
+def _check_single_url(href: str, session: requests.Session) -> dict | None:
+    """Return an issue dict if the URL has a problem, else None."""
+    try:
+        resp = session.head(href, timeout=30, allow_redirects=True,
+                            verify=False, headers=_URL_HEADERS)
+        code = resp.status_code
+        if code in (403, 405):
+            resp = session.get(href, timeout=30, allow_redirects=True,
+                               verify=False, headers=_URL_HEADERS, stream=True)
+            code = resp.status_code
+        if code < 400:
+            return None
+        if code == 404:
+            sev, msg = "error", "URL not found"
+        elif code == 403:
+            sev, msg = "warning", "Access forbidden or bot blocked"
+        elif code == 405:
+            sev, msg = "warning", "Method not allowed"
+        elif code >= 500:
+            sev, msg = "warning", "Server error"
+        else:
+            sev, msg = "warning", "External URL issue"
+        return {"type": "external_url_issue", "href": href,
+                "status_code": code, "category": sev,
+                "message": f"{msg}. Status code - {code}"}
+    except requests.exceptions.Timeout:
+        return {"type": "external_url_issue", "href": href,
+                "category": "warning", "message": "Request timeout"}
+    except requests.exceptions.ConnectionError:
+        return {"type": "external_url_issue", "href": href,
+                "category": "error", "message": "Connection error"}
+    except Exception as e:
+        return {"type": "external_url_issue", "href": href,
+                "category": "error", "message": str(e)}
+
+
+def validate_external_urls(file_details):
+    file_path = file_details["full_path"]
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    hrefs = [
+        link["href"].strip()
+        for link in soup.find_all("a", href=True, class_="url")
+        if link["href"].strip().startswith(("http://", "https://"))
+    ]
+
+    if not hrefs:
+        return {"issues_count": 0, "issues": []}
+
+    session = _make_session()
+    issues = []
+
+    # Check all URLs concurrently — sequential checking with 30 s timeout means
+    # N URLs × 30 s worst-case per file; parallel cuts that to ~30 s total.
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = {pool.submit(_check_single_url, href, session): href
+                   for href in hrefs}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                issues.append(result)
+
+    return {"issues_count": len(issues), "issues": issues}
 
 def validate_url_text_match(file_details):
     file_path = file_details["full_path"]

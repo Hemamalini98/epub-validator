@@ -552,7 +552,7 @@ export default function FilesPage() {
           <EmptyState
             icon={FileCode2}
             title="Could not load files"
-            description="Make sure the backend is running and this folder exists."
+            description="Make sure file is existing and accessible."
             action={{ label: '← Back to Dashboard', onClick: () => navigate('/') }}
           />
         ) : xhtmlFiles.length === 0 ? (
