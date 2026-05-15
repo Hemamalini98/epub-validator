@@ -53,6 +53,7 @@ export type UploadStage =
 // ─── GET /validate/{folderName} ───────────────────────────────────────────────
 export interface ValidationIssue {
   type: string;
+  rule_name?: string;
   category?: 'Error' | 'Warning';
   message?: string;
   href?: string;
@@ -60,6 +61,9 @@ export interface ValidationIssue {
   expected_text?: string;
   actual_text?: string;
   status_code?: number;
+  line_number?: number | null;
+  snippet?: string | null;
+  file_path?: string | null;
   [key: string]: unknown;
 }
 
