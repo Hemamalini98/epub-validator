@@ -182,16 +182,21 @@ class StyleComparator:
             cls for cls, decls in self.class_styles.items()
             if (decls.get("font-style") or "").lower() == "italic"
         }
+        hidden_classes = {
+            cls for cls, decls in self.class_styles.items()
+            if (decls.get("display") or "").lower() == "none"
+            or (decls.get("visibility") or "").lower() == "hidden"
+        }
 
         # Cap candidate set so we don't drown the report. Require ≥4 letters
         # and not a stopword.
         candidates = [w for w in self._pdf_italics if w not in _STOPWORDS and len(w) >= 4]
         candidates = sorted(set(candidates))[:200]
-        word_res = {w: re.compile(rf"\b{re.escape(w)}\b") for w in candidates}
+        word_res = {w: re.compile(rf"(?<![A-Za-z\-]){re.escape(w)}(?![A-Za-z\-])") for w in candidates}
 
         flagged = 0
         for doc in self._content_docs():
-            text_all = doc.soup.get_text(" ", strip=True).lower()
+            text_all = self._visible_text(doc, hidden_classes).lower()
             italic_text_lower = self._collect_italic_text(doc, italic_classes).lower()
             for w in candidates:
                 # Whole-word match, not substring (avoid "bolling" matching
@@ -222,6 +227,38 @@ class StyleComparator:
                              category="Italic Missing"))
         return out
 
+    def _visible_text(self, doc: XhtmlDoc, hidden_classes: Set[str]) -> str:
+        """Return the chapter text excluding subtrees hidden via display:none
+        / visibility:hidden (CSS class or inline style). Accessibility alt-text
+        in <div class="hidden"> blocks shouldn't seed style-parity findings."""
+        from bs4 import NavigableString, Tag
+
+        def is_hidden(tag: Tag) -> bool:
+            cl = tag.get("class") or []
+            if isinstance(cl, str):
+                cl = cl.split()
+            if hidden_classes and any(c in hidden_classes for c in cl):
+                return True
+            style = (tag.get("style") or "").lower().replace(" ", "")
+            return "display:none" in style or "visibility:hidden" in style
+
+        parts: List[str] = []
+
+        def walk(node):
+            if isinstance(node, NavigableString):
+                s = str(node).strip()
+                if s:
+                    parts.append(s)
+                return
+            if isinstance(node, Tag):
+                if is_hidden(node):
+                    return
+                for child in node.children:
+                    walk(child)
+
+        walk(doc.soup)
+        return " ".join(parts)
+
     def _collect_italic_text(self, doc: XhtmlDoc, italic_classes: Set[str]) -> str:
         parts: List[str] = []
         for tag in doc.soup.find_all(["i", "em"]):
@@ -229,6 +266,8 @@ class StyleComparator:
         if italic_classes:
             for tag in doc.soup.find_all(True):
                 cl = tag.get("class") or []
+                if isinstance(cl, str):
+                    cl = cl.split()
                 if any(c in italic_classes for c in cl):
                     parts.append(tag.get_text(" ", strip=True))
         # Inline style

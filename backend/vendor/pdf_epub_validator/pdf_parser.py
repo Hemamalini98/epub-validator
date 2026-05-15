@@ -78,7 +78,35 @@ _FLAG_BOLD = 1 << 4     # 16
 _FLAG_SERIF = 1 << 2    # 4 (not used)
 
 
-_WORD_RE = re.compile(r"[A-Za-z][A-Za-z\-']{2,}")
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z']{2,}")
+
+
+# PostScript font names abbreviate italic/oblique style suffixes in several
+# ways. Match the literal words "italic"/"oblique" anywhere (case-insensitive),
+# OR a camelCase suffix after a hyphen: -It, -BoldIt, -Obl, -BoldObl, -ExO,
+# -BdExO (trailing uppercase O after a style modifier like Ex/Bd/Lt/Md).
+_ITALIC_SUFFIX_RE = re.compile(r"-(?:[A-Za-z]*It|[A-Za-z]*Obl|[A-Za-z]+O)\d*$")
+
+
+def _font_name_says_italic(font_name: str) -> bool:
+    fl = font_name.lower()
+    if "italic" in fl or "oblique" in fl:
+        return True
+    return bool(_ITALIC_SUFFIX_RE.search(font_name))
+
+
+# URL/email spans are often visually italicised in print layouts but rendered
+# as plain <a> tags in EPUB. Skip them when collecting italic candidates so
+# URL fragments (e.g. "aspx", "amazonaws") don't show up as Italic Missing.
+_URL_LIKE_RE = re.compile(
+    r"://|www\.|\.com[/\b]|\.org[/\b]|\.gov[/\b]|\.edu[/\b]|\.net[/\b]"
+    r"|\.aspx\b|\.html?\b|\.pdf\b|@[\w.-]+\.\w+",
+    re.IGNORECASE,
+)
+
+
+def _is_url_like(text: str) -> bool:
+    return bool(_URL_LIKE_RE.search(text))
 
 
 class PdfParser:
@@ -230,9 +258,13 @@ class PdfParser:
                     # visually rendering italic. Require BOTH to agree.
                     font_lower = sp.font.lower()
                     flag_italic = bool(sp.flags & _FLAG_ITALIC)
-                    name_italic = "italic" in font_lower or "oblique" in font_lower
+                    name_italic = _font_name_says_italic(sp.font)
                     italic = flag_italic and name_italic
                     bold = bool(sp.flags & _FLAG_BOLD) or "bold" in font_lower
+                    if italic and _is_url_like(sp.text):
+                        # URL spans are commonly italicised in print but not in EPUB.
+                        # Don't seed italic candidates from these.
+                        italic = False
                     if italic or bold:
                         for w in _WORD_RE.findall(sp.text):
                             if italic:
