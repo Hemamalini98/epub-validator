@@ -45,7 +45,6 @@ class LinkChecker:
     # ------------------------------------------------------------------ #
     def check_broken_links(self) -> List[Issue]:
         problems: List[Issue] = []
-        flagged = 0
         for d in self.epub.xhtml_docs:
             for a in d.soup.find_all("a"):
                 href = a.get("href")
@@ -74,7 +73,6 @@ class LinkChecker:
                         detail=f"Link target file '{target_rel}' does not exist in EPUB.",
                         category="Broken Links",
                     ))
-                    flagged += 1
                 elif anchor and anchor not in self._id_index[target_rel]:
                     problems.append(Issue(
                         name="Broken Links",
@@ -85,12 +83,6 @@ class LinkChecker:
                         detail=f"Anchor #{anchor} not found in '{target_rel}'.",
                         category="Broken Links",
                     ))
-                    flagged += 1
-                if flagged >= 50:
-                    problems.append(Issue(name="Broken Links", status=Status.PARTIAL,
-                                          detail="Stopped after 50 findings.",
-                                          category="Broken Links"))
-                    return problems
         if not problems:
             return [Issue(name="Broken Links", status=Status.PASS,
                           detail="All internal anchors resolve.",
@@ -102,7 +94,6 @@ class LinkChecker:
     # ------------------------------------------------------------------ #
     def check_missing_links(self) -> List[Issue]:
         out: List[Issue] = []
-        flagged = 0
         for d in self.epub.xhtml_docs:
             for p in d.soup.find_all(["p", "li"]):
                 # If the element has any <a>, assume the relevant refs there are
@@ -125,12 +116,6 @@ class LinkChecker:
                             detail=f"Reference '{snippet}' appears without a hyperlink.",
                             category="Link Missing",
                         ))
-                        flagged += 1
-                        if flagged >= 40:
-                            out.append(Issue(name="Link Missing", status=Status.PARTIAL,
-                                             detail="Stopped after 40 findings.",
-                                             category="Link Missing"))
-                            return out
         if not out:
             out.append(Issue(name="Link Missing", status=Status.PASS,
                              detail="No obvious unlinked references detected.",
