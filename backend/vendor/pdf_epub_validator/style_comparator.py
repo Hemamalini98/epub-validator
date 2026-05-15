@@ -54,7 +54,7 @@ _STOPWORDS = {
 
 
 def _words(text: str) -> List[str]:
-    return [w for w in re.findall(r"[A-Za-z][A-Za-z\-']{2,}", text)]
+    return [w for w in re.findall(r"[A-Za-z][A-Za-z\-']*", text)]
 
 
 def _normalize(text: str) -> str:
@@ -479,7 +479,7 @@ class StyleComparator:
         for doc in self._content_docs():
             for p in doc.soup.find_all("p"):
                 etxt = clean_inline_text(p)
-                if len(etxt) < 40:
+                if len(etxt) < 10:
                     continue
                 pdf_para = self._match_pdf_para(etxt)
                 if not pdf_para:
@@ -487,13 +487,14 @@ class StyleComparator:
                 # Tokenise letter words from both, compare aligned positions.
                 ew = _words(etxt)[:30]
                 pw = _words(pdf_para.text)[:30]
-                if not ew or not pw:
+                if len(ew) < 2 or len(pw) < 2:
                     continue
                 length = min(len(ew), len(pw))
                 diffs = [
                     (pw[i], ew[i]) for i in range(length)
                     if pw[i].lower() == ew[i].lower() and pw[i] != ew[i]
-                    and not (pw[i].isupper() and ew[i] != ew[i].upper())  # ALL-CAPS in PDF often = small-caps in EPUB, skip
+                    and not (pw[i].isupper() and ew[i].istitle())  # ALL-CAPS PDF small-caps = title-case EPUB, skip
+                    and not (ew[i].isupper() and pw[i].istitle())  # <small>-tag EPUB ("STEVENS") = title-case PDF small-caps font ("Stevens"), skip
                 ]
                 if not diffs:
                     continue
