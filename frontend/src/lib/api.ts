@@ -95,6 +95,14 @@ export async function getBooks(): Promise<Book[]> {
   return data;
 }
 
+export async function deleteBook(folderName: string): Promise<void> {
+  try {
+    await client.delete(`/books/${folderName}`);
+  } catch (err) {
+    throw new Error(extractErrorMessage(err));
+  }
+}
+
 export interface ExportConfirmResponse {
   status: 'confirm';
   message: string;
