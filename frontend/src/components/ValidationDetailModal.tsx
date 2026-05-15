@@ -521,7 +521,8 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
         {/* Body */}
         <div className="flex flex-1 min-h-0">
 
-          {/* Left sidebar */}
+          {/* Left sidebar — only on Validation Result tab */}
+          {activeTab === 'result' && (
           <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
             <div className="px-3 pt-3 pb-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
@@ -584,6 +585,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
               </div>
             </div>
           </div>
+          )}
 
           {/* Right panel */}
           <div className="flex-1 flex flex-col min-w-0">
