@@ -762,6 +762,32 @@ class StyleComparator:
                         category="Body Image Size / Centering",
                     ))
                     flagged += 1
+                # pixel count limit: images must not exceed 4,000,000 pixels
+                src = (img.get("src") or "").strip()
+                if src and not src.startswith(("http://", "https://", "data:")):
+                    img_abs = os.path.normpath(
+                        os.path.join(os.path.dirname(doc.abs_path), src)
+                    )
+                    if os.path.isfile(img_abs):
+                        try:
+                            with Image.open(img_abs) as pil_img:
+                                iw, ih = pil_img.size
+                            if iw * ih > 4_000_000:
+                                out.append(Issue(
+                                    name="Body Image Too Large",
+                                    status=Status.FAIL,
+                                    file_path=doc.rel_path,
+                                    line_number=line_number_of(doc, src),
+                                    snippet=str(img)[:160],
+                                    detail=(
+                                        f"Image '{os.path.basename(src)}' is {iw}×{ih}"
+                                        f" = {iw * ih:,} pixels — exceeds 4,000,000 pixel limit."
+                                    ),
+                                    category="Body Image Size / Centering",
+                                ))
+                                flagged += 1
+                        except Exception:
+                            pass
                 if flagged >= 30:
                     out.append(Issue(name="Body Image", status=Status.PARTIAL,
                                      detail="Stopped after 30 findings.",
