@@ -16,7 +16,6 @@ from vendor.pdf_epub_validator.epub_extractor import EpubBundle
 from vendor.pdf_epub_validator.pdf_parser import PdfDoc
 
 
-_EPUB_CACHE: dict = {}  # folder_name -> (mtime, EpubBundle)
 _PDF_CACHE: dict = {}   # folder_name -> (mtime, PdfDoc)
 
 
@@ -32,22 +31,29 @@ def _find_source(folder_name: str, ext: str) -> Optional[str]:
     return matches[0] if matches else None
 
 
+def _epub_extract_dir(folder_name: str) -> Optional[str]:
+    """Return the pre-extracted EPUB directory if it exists."""
+    path = os.path.join("uploads", folder_name, "extract", "epub")
+    return path if os.path.isdir(path) else None
+
+
 def get_epub_bundle(folder_name: str) -> Optional[EpubBundle]:
+    epub_dir = _epub_extract_dir(folder_name)
+    if epub_dir:
+        # Always re-parse the pre-extracted folder so edits to XHTML/CSS files
+        # are picked up immediately without a server restart.
+        print(f"[bundle] EpubBundle parsing pre-extracted dir {epub_dir}", flush=True)
+        return EpubExtractor().parse_dir(epub_dir)
+
+    # Fallback: extract from the .epub zip (original behaviour)
     epub_path = _find_source(folder_name, "epub")
     if not epub_path or not os.path.isfile(epub_path):
         return None
-    mtime = os.path.getmtime(epub_path)
-    cached = _EPUB_CACHE.get(folder_name)
-    if cached and cached[0] == mtime:
-        print(f"[bundle] EpubBundle cache HIT for {folder_name}", flush=True)
-        return cached[1]
     print(f"[bundle] EpubBundle MISS — parsing {epub_path}", flush=True)
     # Note: do NOT use context manager — we keep the tmpdir alive for
     # the lifetime of the cached bundle. Extractor's __exit__ would wipe it.
     extractor = EpubExtractor(epub_path)
-    bundle = extractor.extract()
-    _EPUB_CACHE[folder_name] = (mtime, bundle)
-    return bundle
+    return extractor.extract()
 
 
 def get_pdf_doc(folder_name: str, max_pages: Optional[int] = None) -> Optional[PdfDoc]:

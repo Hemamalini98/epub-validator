@@ -51,7 +51,7 @@ class EpubBundle:
 class EpubExtractor:
     """Unpacks an EPUB and exposes parsed XHTML and CSS."""
 
-    def __init__(self, epub_path: str):
+    def __init__(self, epub_path: str = ""):
         self.epub_path = epub_path
         self._tmp_dir: Optional[str] = None
 
@@ -74,6 +74,14 @@ class EpubExtractor:
         with zipfile.ZipFile(self.epub_path, "r") as zf:
             zf.extractall(dest)
 
+        return self._parse_extracted(dest)
+
+    def parse_dir(self, dest: str) -> EpubBundle:
+        """Parse an already-extracted EPUB directory without unzipping."""
+        return self._parse_extracted(dest)
+
+    def _parse_extracted(self, dest: str) -> EpubBundle:
+        """Build an EpubBundle from an already-extracted directory."""
         opf_path = self._find_opf(dest)
         manifest, spine_order, opf_root = self._parse_opf(opf_path) if opf_path else ({}, [], dest)
         nav_path = self._find_nav(dest, manifest, opf_root)
