@@ -104,7 +104,8 @@ class EpubExtractor:
         css_files = self._collect_css(dest)
         css_rules = self._parse_all_css(css_files)
         image_files = self._collect_images(dest)
-        nav_doc = next((d for d in xhtml_docs if nav_path and os.path.samefile(d.abs_path, nav_path)), None)
+        nav_norm = os.path.normcase(os.path.abspath(nav_path)) if nav_path else None
+        nav_doc = next((d for d in xhtml_docs if nav_norm and os.path.normcase(os.path.abspath(d.abs_path)) == nav_norm), None)
 
         return EpubBundle(
             root=dest,
