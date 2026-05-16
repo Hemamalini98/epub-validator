@@ -243,7 +243,7 @@ export default function UploadPage() {
                   <p className="text-sm text-muted-foreground">
                     {failed
                       ? errorMsg ?? 'Something went wrong.'
-                      : 'or click to browse — accepts .epub and .zip'}
+                      : 'or click to browse — accepts .zip only'}
                   </p>
                 </div>
 
@@ -266,7 +266,7 @@ export default function UploadPage() {
                   </Button>
                 )}
 
-                <p className="text-xs text-muted-foreground/70">Supports .epub · .zip</p>
+                <p className="text-xs text-muted-foreground/70">Supports .zip contains .epub and .pdf</p>
               </motion.div>
             ) : (
               /* ── Progress card ─────────────────────────────── */

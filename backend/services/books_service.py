@@ -41,3 +41,13 @@ def upsert_book(book: dict) -> None:
 def get_all_books() -> list:
     with _lock:
         return _load()
+
+
+def delete_book(folder_name: str) -> bool:
+    with _lock:
+        books = _load()
+        new_books = [b for b in books if b.get("folder_name") != folder_name]
+        if len(new_books) == len(books):
+            return False
+        _save(new_books)
+        return True

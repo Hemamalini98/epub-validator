@@ -34,48 +34,96 @@ type DisplayIssue = ValidationIssue & { _ruleName: string };
 function RuleRow({
   entry,
   isSelected,
+  selectedSubRuleName,
   onClick,
+  onSubRuleClick,
 }: {
   entry: ValidationFileEntry;
   isSelected: boolean;
+  selectedSubRuleName: string | null;
   onClick: () => void;
+  onSubRuleClick: (name: string) => void;
 }) {
   const errors   = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() === 'error').length;
   const warnings = entry.result.issues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length;
   const passed   = entry.result.issues.length === 0;
 
+  const subRuleNames = [...new Set(
+    entry.result.issues.map(i => i.rule_name).filter((n): n is string => !!n)
+  )];
+
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full text-left px-3 py-2.5 rounded-lg transition-colors',
-        isSelected ? 'bg-primary/10' : 'hover:bg-muted',
-      )}
-    >
-      <div className="flex items-center justify-between gap-1.5">
-        <span className={cn(
-          'text-xs font-medium truncate',
-          isSelected ? 'text-primary' : 'text-foreground',
-        )}>
-          {entry.rule_name}
-        </span>
-        {passed ? (
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
-        ) : errors > 0 ? (
-          <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
-        ) : (
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+    <div>
+      <button
+        onClick={onClick}
+        className={cn(
+          'w-full text-left px-3 py-2.5 rounded-lg transition-colors',
+          isSelected ? 'bg-primary/10' : 'hover:bg-muted',
         )}
-      </div>
-      {!passed && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
-          {[
-            errors   > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
-            warnings > 0 && `${warnings} warning${warnings !== 1 ? 's' : ''}`,
-          ].filter(Boolean).join(' · ')}
-        </p>
+      >
+        <div className="flex items-center justify-between gap-1.5">
+          <span className={cn(
+            'text-xs font-medium truncate',
+            isSelected ? 'text-primary' : 'text-foreground',
+          )}>
+            {entry.rule_name}
+          </span>
+          {passed ? (
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+          ) : errors > 0 ? (
+            <XCircle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />
+          ) : (
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+          )}
+        </div>
+        {!passed && (
+          <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
+            {[
+              errors   > 0 && `${errors} error${errors !== 1 ? 's' : ''}`,
+              warnings > 0 && `${warnings} warning${warnings !== 1 ? 's' : ''}`,
+            ].filter(Boolean).join(' · ')}
+          </p>
+        )}
+      </button>
+
+      {subRuleNames.length > 0 && (
+        <div className="ml-3 pl-2 border-l border-border/40 mt-0.5 mb-1 space-y-0.5">
+          {subRuleNames.map(name => {
+            const subErrors   = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() === 'error').length;
+            const subWarnings = entry.result.issues.filter(i => i.rule_name === name && (i.category ?? '').toLowerCase() !== 'error').length;
+            const isSubSelected = isSelected && selectedSubRuleName === name;
+            return (
+              <button
+                key={name}
+                onClick={(e) => { e.stopPropagation(); onSubRuleClick(name); }}
+                className={cn(
+                  'w-full text-left px-2 py-1.5 rounded transition-colors',
+                  isSubSelected ? 'bg-primary/10' : 'hover:bg-muted',
+                )}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className={cn(
+                    'text-[11px] font-medium truncate',
+                    isSubSelected ? 'text-primary' : 'text-foreground',
+                  )}>
+                    {name}
+                  </span>
+                  {subErrors > 0
+                    ? <XCircle className="w-3 h-3 text-red-500 flex-shrink-0" />
+                    : <AlertTriangle className="w-3 h-3 text-amber-500 flex-shrink-0" />}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-none">
+                  {[
+                    subErrors   > 0 && `${subErrors} error${subErrors !== 1 ? 's' : ''}`,
+                    subWarnings > 0 && `${subWarnings} warning${subWarnings !== 1 ? 's' : ''}`,
+                  ].filter(Boolean).join(' · ')}
+                </p>
+              </button>
+            );
+          })}
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -84,6 +132,7 @@ function RuleRow({
 function IssueRow({ issue }: { issue: DisplayIssue }) {
   const isError = (issue.category ?? '').toLowerCase() === 'error';
   const hasDiff = issue.expected_text || issue.actual_text;
+  const snippetParts = issue.snippet ? issue.snippet.split(' ⏎ ') : null;
 
   return (
     <div className={cn(
@@ -104,13 +153,31 @@ function IssueRow({ issue }: { issue: DisplayIssue }) {
             'font-medium text-xs',
             isError ? 'text-red-700 dark:text-red-400' : 'text-amber-700 dark:text-amber-400',
           )}>
-            {issue.type}
+            {issue.rule_name || issue.type}
+            {typeof issue.line_number === 'number' && (
+              <span className="ml-1.5 font-mono text-[10px] opacity-70">line {issue.line_number}</span>
+            )}
           </p>
           {issue.message && (
             <p className="text-xs text-muted-foreground mt-0.5 break-words">{issue.message}</p>
           )}
           {issue.href && (
             <p className="text-xs font-mono text-muted-foreground mt-0.5 break-all opacity-70">{issue.href}</p>
+          )}
+          {snippetParts && !hasDiff && (
+            <div className="mt-2 rounded-md border border-border/60 bg-background/60 px-2.5 py-2 text-xs font-mono text-foreground/80 leading-relaxed">
+              {snippetParts.length === 2 ? (
+                <>
+                  <span className="break-words">…{snippetParts[0].trim()}</span>
+                  <span className="block my-0.5 text-[10px] uppercase tracking-widest text-muted-foreground/70 font-sans">
+                    ↵ paragraph break
+                  </span>
+                  <span className="break-words">{snippetParts[1].trim()}…</span>
+                </>
+              ) : (
+                <span className="break-words">…{issue.snippet}…</span>
+              )}
+            </div>
           )}
           <p className="text-[10px] text-muted-foreground mt-1 opacity-60">{issue._ruleName}</p>
         </div>
@@ -338,6 +405,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   }, [entries]);
 
   const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning'>('all');
+  const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
 
   const toggleIssueFilter = (f: 'error' | 'warning') =>
     setIssueFilter((prev) => (prev === f ? 'all' : f));
@@ -353,10 +421,12 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   }, [entries, selectedRuleId]);
 
   const displayedIssues = useMemo<DisplayIssue[]>(() => {
-    if (issueFilter === 'error')   return allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error');
-    if (issueFilter === 'warning') return allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
-    return allIssues;
-  }, [allIssues, issueFilter]);
+    let issues = allIssues;
+    if (issueFilter === 'error')   issues = issues.filter(i => (i.category ?? '').toLowerCase() === 'error');
+    if (issueFilter === 'warning') issues = issues.filter(i => (i.category ?? '').toLowerCase() !== 'error');
+    if (ruleNameFilter)            issues = issues.filter(i => i.rule_name === ruleNameFilter);
+    return issues;
+  }, [allIssues, issueFilter, ruleNameFilter]);
 
   const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
   const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
@@ -451,7 +521,8 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
         {/* Body */}
         <div className="flex flex-1 min-h-0">
 
-          {/* Left sidebar */}
+          {/* Left sidebar — only on Validation Result tab */}
+          {activeTab === 'result' && (
           <div className="w-56 flex-shrink-0 border-r border-border flex flex-col">
             <div className="px-3 pt-3 pb-1.5">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground px-2">
@@ -462,7 +533,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
             <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
               {/* All-issues shortcut */}
               <button
-                onClick={() => setSelectedRule(null)}
+                onClick={() => { setSelectedRule(null); setRuleNameFilter(null); }}
                 className={cn(
                   'w-full text-left px-3 py-2 rounded-lg transition-colors text-xs font-medium',
                   selectedRuleId === null
@@ -483,10 +554,12 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
               ) : (
                 entries.map((entry) => (
                   <RuleRow
-                    key={entry.rule_id}
+                    key={`${entry.rule_id}-${entry.file_details.file_name}`}
                     entry={entry}
                     isSelected={selectedRuleId === entry.rule_id}
-                    onClick={() => setSelectedRule(entry.rule_id)}
+                    selectedSubRuleName={selectedRuleId === entry.rule_id ? ruleNameFilter : null}
+                    onClick={() => { setSelectedRule(entry.rule_id); setRuleNameFilter(null); }}
+                    onSubRuleClick={(name) => { setSelectedRule(entry.rule_id); setRuleNameFilter(name); }}
                   />
                 ))
               )}
@@ -512,6 +585,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
               </div>
             </div>
           </div>
+          )}
 
           {/* Right panel */}
           <div className="flex-1 flex flex-col min-w-0">
@@ -538,39 +612,42 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
 
             {/* Filter bar — visible only on Validation Result tab, never scrolls */}
             {activeTab === 'result' && allIssues.length > 0 && (
-              <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-border bg-card">
-                <button
-                  onClick={() => toggleIssueFilter('error')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors',
-                    issueFilter === 'error'
-                      ? 'bg-red-500 text-white border-red-500'
-                      : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100',
-                  )}
-                >
-                  <XCircle className="w-3 h-3" />
-                  Error ({errorCount})
-                </button>
-                <button
-                  onClick={() => toggleIssueFilter('warning')}
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors',
-                    issueFilter === 'warning'
-                      ? 'bg-amber-500 text-white border-amber-500'
-                      : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100',
-                  )}
-                >
-                  <AlertTriangle className="w-3 h-3" />
-                  Warning ({warningCount})
-                </button>
-                {issueFilter !== 'all' && (
+              <div className="flex-shrink-0 border-b border-border bg-card">
+                {/* Severity filter row */}
+                <div className="flex items-center gap-2 px-4 py-2.5">
                   <button
-                    onClick={() => setIssueFilter('all')}
-                    className="text-[11px] text-muted-foreground hover:text-foreground underline ml-1"
+                    onClick={() => toggleIssueFilter('error')}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors',
+                      issueFilter === 'error'
+                        ? 'bg-red-500 text-white border-red-500'
+                        : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100',
+                    )}
                   >
-                    Clear
+                    <XCircle className="w-3 h-3" />
+                    Error ({errorCount})
                   </button>
-                )}
+                  <button
+                    onClick={() => toggleIssueFilter('warning')}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors',
+                      issueFilter === 'warning'
+                        ? 'bg-amber-500 text-white border-amber-500'
+                        : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100',
+                    )}
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Warning ({warningCount})
+                  </button>
+                  {issueFilter !== 'all' && (
+                    <button
+                      onClick={() => setIssueFilter('all')}
+                      className="text-[11px] text-muted-foreground hover:text-foreground underline ml-1"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 

@@ -47,6 +47,27 @@
       "target_path": "OEBPS/css",
       "enabled": true,
       "file_name_pattern": "*.css"
+    },
+    {
+      "id": "URL004",
+      "name": "PDF-EPUB Link Checker (broken anchors + missing links)",
+      "function": "validate_pdf_link_checker",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "NAV002",
+      "name": "PDF-EPUB Nav Validator (heading coverage + hierarchy + EISBN)",
+      "function": "validate_nav_full",
+      "scope": "book",
+      "enabled": true
+    },
+    {
+      "id": "PDF001",
+      "name": "PDF-EPUB Style Parity (italic, alignment, indent, images, colour, page count)",
+      "function": "validate_pdf_style_parity",
+      "scope": "book",
+      "enabled": true
     }
   ]
 }

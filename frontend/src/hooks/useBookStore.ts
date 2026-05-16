@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { getBooks } from '@/lib/api';
+import { getBooks, deleteBook as deleteBookApi } from '@/lib/api';
 import type { Book } from '@/types';
 
 export function useBookStore() {
@@ -16,5 +16,10 @@ export function useBookStore() {
     queryClient.invalidateQueries({ queryKey: ['books'] });
   };
 
-  return { books, upsertBook };
+  const deleteBook = async (folderName: string) => {
+    await deleteBookApi(folderName);
+    queryClient.invalidateQueries({ queryKey: ['books'] });
+  };
+
+  return { books, upsertBook, deleteBook };
 }

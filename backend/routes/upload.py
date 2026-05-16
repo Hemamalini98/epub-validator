@@ -1,5 +1,6 @@
 import asyncio
 import io
+import shutil
 import zipfile
 from fastapi import APIRouter, Query, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, Response
@@ -7,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from services.upload_service import process_upload, get_extract_files, UPLOAD_DIR, EXTRACT_DIR
 from services.validate_service import validate_epub
-from services.books_service import get_all_books
+from services.books_service import get_all_books, delete_book as delete_book_record
 from services.pdf_service import find_pdf_page, render_pdf_page
 
 router = APIRouter()
@@ -32,6 +33,17 @@ def health_check():
 @router.get("/books")
 def list_books():
     return get_all_books()
+
+
+@router.delete("/books/{folder_name}")
+async def remove_book(folder_name: str):
+    removed = delete_book_record(folder_name)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Book not found")
+    folder_path = Path(UPLOAD_DIR) / folder_name
+    if folder_path.exists():
+        await asyncio.to_thread(shutil.rmtree, folder_path)
+    return {"status": True, "message": "Book deleted"}
 
 
 @router.post("/upload")

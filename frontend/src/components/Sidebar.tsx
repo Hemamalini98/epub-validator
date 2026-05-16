@@ -6,7 +6,6 @@ import {
   ShieldCheck,
   BarChart3,
   Settings,
-  BookOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -40,16 +39,15 @@ export function Sidebar() {
   return (
     <aside className="w-60 h-screen bg-card border-r border-border flex flex-col flex-shrink-0 select-none">
       {/* Logo */}
-      <div className="px-5 py-4 border-b border-border">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-            <BookOpen className="w-4 h-4 text-primary-foreground" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-foreground leading-none">EPUB Validator</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Publishing Platform</p>
-          </div>
-        </div>
+      <div className="px-5 py-4 border-b border-border flex flex-col items-center gap-1.5">
+        <img
+          src="/logo.png"
+          alt="S4Carlisle Publishing Services"
+          className="w-full max-w-[160px] h-auto object-contain"
+        />
+        <p className="text-xs font-semibold text-muted-foreground tracking-wide uppercase">
+          EPUB Validator
+        </p>
       </div>
 
       {/* Navigation */}
