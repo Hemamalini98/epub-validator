@@ -80,11 +80,22 @@ class StyleComparator:
         self.class_styles = build_class_styles(epub.css_rules)
 
         # Index PDF paragraphs by a normalised lookup key (first ~80 chars).
-        self._pdf_by_key: Dict[str, PdfParagraph] = {}
+        # Store *all* paragraphs per key — chapter titles commonly appear in
+        # the PDF TOC and again in the chapter body, and we want to compare
+        # against the chapter body (latest page), not the TOC.
+        self._pdf_by_key: Dict[str, List[PdfParagraph]] = {}
         for p in pdf.paragraphs:
             key = _normalize(p.text)[:80]
             if key:
-                self._pdf_by_key.setdefault(key, p)
+                self._pdf_by_key.setdefault(key, []).append(p)
+
+        # Full normalized text per paragraph, used for substring fallback
+        # matching when the EPUB splits a logical block across multiple <p>s
+        # but the PDF keeps it merged as one paragraph (e.g. author blocks
+        # on title pages).
+        self._pdf_norm_index: List[Tuple[str, "PdfParagraph"]] = [
+            (_normalize(p.text), p) for p in pdf.paragraphs
+        ]
 
         # Index of italic words globally for fast lookup. Only words that are
         # *always* italic in PDF — otherwise we'd flag every appearance of
@@ -491,11 +502,17 @@ class StyleComparator:
                 etxt = clean_inline_text(el)
                 if len(etxt) < 10:
                     continue
-                pdf_para = self._match_pdf_para(etxt)
-                if not pdf_para:
+                match = self._match_pdf_para_aligned(etxt)
+                if not match:
                     continue
+                pdf_para, word_offset = match
                 ew = _words(etxt)
                 pw = _words(pdf_para.text)
+                # When the EPUB text aligns mid-paragraph in the PDF
+                # (substring match), slice the PDF word list so positions
+                # line up with the EPUB words.
+                if word_offset:
+                    pw = pw[word_offset:]
                 if len(ew) < 2 or len(pw) < 2:
                     continue
                 length = min(len(ew), len(pw))
@@ -918,16 +935,65 @@ class StyleComparator:
         ]
 
     def _match_pdf_para(self, epub_text: str) -> Optional[PdfParagraph]:
+        res = self._match_pdf_para_aligned(epub_text)
+        return res[0] if res else None
+
+    def _match_pdf_para_aligned(
+        self, epub_text: str
+    ) -> Optional[Tuple[PdfParagraph, int]]:
+        """Find a PDF paragraph matching the EPUB text and return it with
+        the *word offset* at which the EPUB text starts inside the PDF
+        paragraph.
+
+        Three strategies, in order:
+          1. Exact 80-char prefix match.
+          2. Sliding 50-char prefix match.
+          3. Substring match — the EPUB text appears mid-paragraph in the
+             PDF (handles EPUBs that split a logical block across multiple
+             <p>s while the PDF stores it merged).
+
+        When several PDF paragraphs match the same key, prefer the one on
+        the *latest* page: the chapter title appears in the PDF TOC near
+        the front of the document, then again in the chapter body — and
+        the chapter body is what should be compared.
+        """
         key = _normalize(epub_text)[:80]
         if not key:
             return None
-        if key in self._pdf_by_key:
-            return self._pdf_by_key[key]
-        # Try a sliding shorter key
+
+        # 1. Exact prefix match.
+        matches = self._pdf_by_key.get(key)
+        if matches:
+            best = max(matches, key=lambda p: p.page)
+            return (best, 0)
+
+        # 2. Sliding shorter prefix.
         short = key[:50]
-        for k, p in self._pdf_by_key.items():
+        cand: List[PdfParagraph] = []
+        for k, paras in self._pdf_by_key.items():
             if k.startswith(short):
-                return p
+                cand.extend(paras)
+        if cand:
+            best = max(cand, key=lambda p: p.page)
+            return (best, 0)
+
+        # 3. Substring fallback — EPUB <p> is a slice of a larger PDF para.
+        needle = _normalize(epub_text)
+        if len(needle) < 12:
+            return None
+        substr_cands: List[Tuple[PdfParagraph, int]] = []
+        for norm_text, para in self._pdf_norm_index:
+            idx = norm_text.find(needle)
+            if idx <= 0:
+                continue
+            # _words() is regex on raw text; _normalize only collapses
+            # whitespace and lowercases, so word counts align 1:1 between
+            # normalized and original. Counting words in the normalized
+            # prefix up to `idx` gives us the offset into the PDF word list.
+            word_offset = len(_words(norm_text[:idx]))
+            substr_cands.append((para, word_offset))
+        if substr_cands:
+            return max(substr_cands, key=lambda t: t[0].page)
         return None
 
 
