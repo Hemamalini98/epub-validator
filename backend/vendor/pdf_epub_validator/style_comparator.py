@@ -18,6 +18,11 @@ from .pdf_parser import PdfDoc, PdfParagraph
 from .report_generator import Issue, Status
 
 
+# Per-rule cap on reported findings. Overridable via env var so a noisy book
+# can be cranked higher without code edits.
+MAX_FINDINGS_PER_RULE = int(os.environ.get("MAX_FINDINGS_PER_RULE", "500"))
+
+
 # ---------------------------------------------------------------------- #
 # CSS helpers                                                            #
 # ---------------------------------------------------------------------- #
@@ -155,9 +160,9 @@ class StyleComparator:
                     category="Para Splitting",
                 ))
                 flagged += 1
-                if flagged >= 30:
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Para Splitting", status=Status.PARTIAL,
-                                     detail="Stopped after 30 findings.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
                                      category="Para Splitting"))
                     return out
         if not out:
@@ -216,9 +221,9 @@ class StyleComparator:
                     category="Italic Missing",
                 ))
                 flagged += 1
-                if flagged >= 50:  # report cap
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Italic Missing", status=Status.PARTIAL,
-                                     detail=f"Stopped after 50 findings; more may exist.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings; more may exist.",
                                      category="Italic Missing"))
                     return out
         if flagged == 0:
@@ -318,9 +323,9 @@ class StyleComparator:
                     category="Incorrect Alignment",
                 ))
                 flagged += 1
-                if flagged >= 30:
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Incorrect Alignment", status=Status.PARTIAL,
-                                     detail="Stopped after 30 findings.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
                                      category="Incorrect Alignment"))
                     return out
         if flagged == 0:
@@ -379,9 +384,9 @@ class StyleComparator:
                     category="Hanging Alignment Missing",
                 ))
                 flagged += 1
-                if flagged >= 30:
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Hanging Alignment Missing", status=Status.PARTIAL,
-                                     detail="Stopped after 30 findings.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
                                      category="Hanging Alignment Missing"))
                     return out
         if flagged == 0:
@@ -472,21 +477,25 @@ class StyleComparator:
     # 6. Incorrect case                                                  #
     # ------------------------------------------------------------------ #
     def check_incorrect_case(self) -> List[Issue]:
-        """For paragraphs that match PDF text by lowercase prefix, compare
-        original casing. Differences ⇒ Incorrect Case."""
+        """For text blocks that match PDF text by lowercase prefix, compare
+        original casing. Differences ⇒ Incorrect Case.
+
+        Scans <p>, <h1>–<h6>, and <li> — headings and list items are where
+        casing errors are most visible. Full word-list is compared (no slice)
+        so issues past position 30 are no longer hidden."""
         out: List[Issue] = []
         flagged = 0
+        tag_names = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]
         for doc in self._content_docs():
-            for p in doc.soup.find_all("p"):
-                etxt = clean_inline_text(p)
+            for el in doc.soup.find_all(tag_names):
+                etxt = clean_inline_text(el)
                 if len(etxt) < 10:
                     continue
                 pdf_para = self._match_pdf_para(etxt)
                 if not pdf_para:
                     continue
-                # Tokenise letter words from both, compare aligned positions.
-                ew = _words(etxt)[:30]
-                pw = _words(pdf_para.text)[:30]
+                ew = _words(etxt)
+                pw = _words(pdf_para.text)
                 if len(ew) < 2 or len(pw) < 2:
                     continue
                 length = min(len(ew), len(pw))
@@ -510,9 +519,9 @@ class StyleComparator:
                     category="Incorrect Case",
                 ))
                 flagged += 1
-                if flagged >= 30:
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Incorrect Case", status=Status.PARTIAL,
-                                     detail="Stopped after 30 findings.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
                                      category="Incorrect Case"))
                     return out
         if flagged == 0:
@@ -565,7 +574,10 @@ class StyleComparator:
                     category="Additional Indentation",
                 ))
                 flagged += 1
-                if flagged >= 10:
+                if flagged >= MAX_FINDINGS_PER_RULE:
+                    out.append(Issue(name="Additional Indentation", status=Status.PARTIAL,
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
+                                     category="Additional Indentation"))
                     return out
         return out
 
@@ -606,7 +618,10 @@ class StyleComparator:
                     category="Line Space Missing",
                 ))
                 flagged += 1
-                if flagged >= 15:
+                if flagged >= MAX_FINDINGS_PER_RULE:
+                    out.append(Issue(name="Line Space Missing", status=Status.PARTIAL,
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
+                                     category="Line Space Missing"))
                     return out
         if flagged == 0:
             out.append(Issue(name="Line Space Missing", status=Status.PASS,
@@ -655,7 +670,10 @@ class StyleComparator:
                             category="Additional Block Quote",
                         ))
                         flagged += 1
-                        if flagged >= 15:
+                        if flagged >= MAX_FINDINGS_PER_RULE:
+                            out.append(Issue(name="Additional Block Quote", status=Status.PARTIAL,
+                                             detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
+                                             category="Additional Block Quote"))
                             return out
         if flagged == 0:
             out.append(Issue(name="Additional Block Quote", status=Status.PASS,
@@ -788,9 +806,9 @@ class StyleComparator:
                                 flagged += 1
                         except Exception:
                             pass
-                if flagged >= 30:
+                if flagged >= MAX_FINDINGS_PER_RULE:
                     out.append(Issue(name="Body Image", status=Status.PARTIAL,
-                                     detail="Stopped after 30 findings.",
+                                     detail=f"Stopped after {MAX_FINDINGS_PER_RULE} findings.",
                                      category="Body Image Size / Centering"))
                     return out
         if flagged == 0:

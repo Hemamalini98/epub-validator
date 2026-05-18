@@ -100,6 +100,15 @@ class NavValidator:
     # Hierarchy: heading levels match nav nesting depth                  #
     # ------------------------------------------------------------------ #
     def check_nav_hierarchy(self) -> List[Issue]:
+        # Disabled: this check assumes heading levels (h1/h2/h3) express the
+        # document's hierarchy with a constant offset relative to nav nesting
+        # depth. Books that style headings with CSS classes, skip heading
+        # levels (h1 → h3), or mix levels within a chapter all produce false
+        # positives under that model. The signal-to-noise ratio is too low to
+        # keep the rule active.
+        return [Issue(name="Incorrect Level in NAV", status=Status.PASS,
+                      detail="Hierarchy check disabled (varies by heading style).",
+                      category="Incorrect Level in NAV")]
         nav_doc = self.epub.nav_doc
         if not nav_doc:
             return []
@@ -154,16 +163,28 @@ class NavValidator:
         # Per-document mode offset.
         from collections import Counter
         offsets_by_doc: Dict[str, Counter] = {}
+        levels_by_doc: Dict[str, Set[int]] = {}
         for doc, _txt, level, depth in pairs:
             offsets_by_doc.setdefault(doc.rel_path, Counter())[depth - level] += 1
+            levels_by_doc.setdefault(doc.rel_path, set()).add(level)
 
         doc_offset: Dict[str, int] = {
             rel: counter.most_common(1)[0][0]
             for rel, counter in offsets_by_doc.items()
         }
 
+        # Docs that use only a single heading level (e.g. every heading is
+        # <h1>, with CSS classes carrying the visual hierarchy) carry no
+        # h1/h2/h3 hierarchy to validate against — comparing nav depth to
+        # heading level produces only false positives. Skip them.
+        skip_docs: Set[str] = {
+            rel for rel, lvls in levels_by_doc.items() if len(lvls) <= 1
+        }
+
         problems: List[Tuple[str, str, int, int]] = []
         for doc, txt, level, depth in pairs:
+            if doc.rel_path in skip_docs:
+                continue
             expected = doc_offset.get(doc.rel_path, 0)
             if depth - level != expected:
                 problems.append((doc.rel_path, txt, level, depth))
