@@ -66,6 +66,28 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
 
 
+def _find_at_word_boundary(haystack: str, needle: str) -> int:
+    """Index of the first word-boundary–aligned occurrence of `needle` in
+    `haystack`, or -1 if none. Both inputs are expected to be normalised
+    (single-space-separated, lowercase). A match is accepted only when the
+    character before `needle` is start-of-string or space *and* the
+    character after is end-of-string or space — so "jane doe" cannot match
+    inside "marijane doesn't".
+    """
+    nlen = len(needle)
+    hlen = len(haystack)
+    start = 0
+    while True:
+        idx = haystack.find(needle, start)
+        if idx < 0:
+            return -1
+        left_ok = idx == 0 or haystack[idx - 1] == " "
+        right_ok = idx + nlen == hlen or haystack[idx + nlen] == " "
+        if left_ok and right_ok:
+            return idx
+        start = idx + 1
+
+
 # ---------------------------------------------------------------------- #
 # StyleComparator                                                        #
 # ---------------------------------------------------------------------- #
@@ -945,17 +967,20 @@ class StyleComparator:
         the *word offset* at which the EPUB text starts inside the PDF
         paragraph.
 
-        Three strategies, in order:
-          1. Exact 80-char prefix match.
-          2. Sliding 50-char prefix match.
-          3. Substring match — the EPUB text appears mid-paragraph in the
-             PDF (handles EPUBs that split a logical block across multiple
-             <p>s while the PDF stores it merged).
+        Two strategies, in order:
+          1. Exact 80-char prefix match (fast path; EPUB <p> ↔ PDF para 1:1).
+          2. Word-boundary substring match — the EPUB text appears anywhere
+             inside a PDF paragraph, aligned to whitespace on both ends.
+             Handles EPUBs that split a logical block (author list, byline,
+             address) across multiple <p>s while the PDF stores it merged
+             as one paragraph: each split line maps back to its correct
+             word offset inside the merged PDF paragraph, so downstream
+             checks (case, alignment, …) compare apples to apples.
 
-        When several PDF paragraphs match the same key, prefer the one on
-        the *latest* page: the chapter title appears in the PDF TOC near
-        the front of the document, then again in the chapter body — and
-        the chapter body is what should be compared.
+        When several PDF paragraphs match, prefer the one on the *latest*
+        page: chapter titles appear in the PDF TOC near the front of the
+        document, then again in the chapter body — and the chapter body
+        is what should be compared.
         """
         key = _normalize(epub_text)[:80]
         if not key:
@@ -967,30 +992,20 @@ class StyleComparator:
             best = max(matches, key=lambda p: p.page)
             return (best, 0)
 
-        # 2. Sliding shorter prefix.
-        short = key[:50]
-        cand: List[PdfParagraph] = []
-        for k, paras in self._pdf_by_key.items():
-            if k.startswith(short):
-                cand.extend(paras)
-        if cand:
-            best = max(cand, key=lambda p: p.page)
-            return (best, 0)
-
-        # 3. Substring fallback — EPUB <p> is a slice of a larger PDF para.
+        # 2. Word-boundary substring match.
         needle = _normalize(epub_text)
-        if len(needle) < 12:
+        if len(needle) < 6:
             return None
         substr_cands: List[Tuple[PdfParagraph, int]] = []
         for norm_text, para in self._pdf_norm_index:
-            idx = norm_text.find(needle)
-            if idx <= 0:
+            idx = _find_at_word_boundary(norm_text, needle)
+            if idx < 0:
                 continue
             # _words() is regex on raw text; _normalize only collapses
             # whitespace and lowercases, so word counts align 1:1 between
             # normalized and original. Counting words in the normalized
             # prefix up to `idx` gives us the offset into the PDF word list.
-            word_offset = len(_words(norm_text[:idx]))
+            word_offset = len(_words(norm_text[:idx])) if idx > 0 else 0
             substr_cands.append((para, word_offset))
         if substr_cands:
             return max(substr_cands, key=lambda t: t[0].page)
