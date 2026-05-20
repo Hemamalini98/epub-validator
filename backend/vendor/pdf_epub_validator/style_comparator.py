@@ -51,6 +51,7 @@ def merge_props(classes: Iterable[str], styles: Dict[str, Dict[str, str]]) -> Di
 
 # Common stopwords we never flag for italic/case checks.
 _STOPWORDS = {
+    "a", "an", "i", "it", "we", "us", "he", "she", "his", "her",
     "the", "and", "but", "for", "with", "from", "this", "that", "these", "those",
     "into", "onto", "over", "under", "after", "before", "between", "during",
     "of", "in", "on", "at", "to", "by", "as", "is", "are", "was", "were", "be",
@@ -64,6 +65,32 @@ def _words(text: str) -> List[str]:
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip().lower()
+
+
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100, "d": 500, "m": 1000}
+
+
+def _roman_to_int(s: str) -> Optional[int]:
+    """Parse a Roman numeral (case-insensitive) to its integer value.
+    Returns None if the input contains any non-Roman characters or is empty.
+    Used as a fallback when the PDF carries no page-label map but the EPUB
+    pagebreak markers carry front-matter labels like 'iii' / 'xxv'."""
+    s = (s or "").strip().lower()
+    if not s or not all(ch in _ROMAN_VALUES for ch in s):
+        return None
+    total = 0
+    prev = 0
+    for ch in reversed(s):
+        val = _ROMAN_VALUES[ch]
+        if val < prev:
+            total -= val
+        else:
+            total += val
+            prev = val
+    return total if total > 0 else None
+
+
+_TOC_FILE_RE = re.compile(r"\b(toc|contents)\b", re.IGNORECASE)
 
 
 def _find_at_word_boundary(haystack: str, needle: str) -> int:
@@ -118,6 +145,16 @@ class StyleComparator:
         self._pdf_norm_index: List[Tuple[str, "PdfParagraph"]] = [
             (_normalize(p.text), p) for p in pdf.paragraphs
         ]
+
+        # Logical page-label → physical 1-based PDF page. Used to resolve
+        # XHTML pagebreak markers (which carry the *label*, e.g. "iii" or "25")
+        # back to the physical page number stored on PdfParagraph.page, so
+        # case-checking can restrict candidates to the right PDF page.
+        self._epub_label_to_pdf_page: Dict[str, int] = {}
+        for pp in getattr(pdf, "pages", []) or []:
+            lbl = (pp.label or "").strip()
+            if lbl:
+                self._epub_label_to_pdf_page.setdefault(lbl, pp.page_number)
 
         # Index of italic words globally for fast lookup. Only words that are
         # *always* italic in PDF — otherwise we'd flag every appearance of
@@ -515,16 +552,29 @@ class StyleComparator:
 
         Scans <p>, <h1>–<h6>, and <li> — headings and list items are where
         casing errors are most visible. Full word-list is compared (no slice)
-        so issues past position 30 are no longer hidden."""
+        so issues past position 30 are no longer hidden.
+
+        Matching is scoped to the PDF page the XHTML element sits on, derived
+        from epub:type='pagebreak' / role='doc-pagebreak' markers — otherwise
+        a repeated short prefix lands on the wrong PDF paragraph and the case
+        diff is spurious."""
         out: List[Issue] = []
         flagged = 0
         tag_names = ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"]
         for doc in self._content_docs():
+            if self._is_toc_doc(doc):
+                # TOC entries inherently match multiple PDF paragraphs
+                # (TOC line ↔ chapter heading), and they rarely carry
+                # per-entry pagebreak markers, so page-scoped matching
+                # can't disambiguate. Skip the whole file.
+                continue
+            page_for_el = self._build_doc_page_map(doc, tag_names)
             for el in doc.soup.find_all(tag_names):
                 etxt = clean_inline_text(el)
                 if len(etxt) < 10:
                     continue
-                match = self._match_pdf_para_aligned(etxt)
+                page_hint = page_for_el.get(id(el))
+                match = self._match_pdf_para_aligned(etxt, page_hint=page_hint)
                 if not match:
                     continue
                 pdf_para, word_offset = match
@@ -541,6 +591,7 @@ class StyleComparator:
                 diffs = [
                     (pw[i], ew[i]) for i in range(length)
                     if pw[i].lower() == ew[i].lower() and pw[i] != ew[i]
+                    and pw[i].lower() not in _STOPWORDS  # ignore "and"/"the"/… common-word diffs
                     and not (pw[i].isupper() and ew[i].istitle())  # ALL-CAPS PDF small-caps = title-case EPUB, skip
                     and not (ew[i].isupper() and pw[i].istitle())  # <small>-tag EPUB ("STEVENS") = title-case PDF small-caps font ("Stevens"), skip
                 ]
@@ -956,12 +1007,97 @@ class StyleComparator:
             if not self.epub.nav_path or os.path.normpath(d.abs_path) != os.path.normpath(self.epub.nav_path)
         ]
 
+    def _resolve_pagebreak_page(self, el) -> Optional[int]:
+        """Resolve a pagebreak marker to a physical PDF page (1-based).
+
+        Priority: title / aria-label / id / text content. Within each source
+        we try (1) PDF page-label map, (2) decimal int, (3) Roman numeral.
+        The Roman fallback matters when the PDF carries no page labels but
+        the EPUB front matter uses 'iii'/'iv'/... — without it those pages
+        would have no hint and revert to global matching."""
+        def _resolve_token(v: str) -> Optional[int]:
+            v = (v or "").strip()
+            if not v:
+                return None
+            if v in self._epub_label_to_pdf_page:
+                return self._epub_label_to_pdf_page[v]
+            if v.isdigit():
+                return int(v)
+            roman = _roman_to_int(v)
+            if roman is not None:
+                return roman
+            return None
+
+        for attr in ("title", "aria-label"):
+            page = _resolve_token(el.get(attr) or "")
+            if page is not None:
+                return page
+        id_attr = (el.get("id") or "").strip()
+        # id="page_iii" / id="page-25" — pull the suffix and re-resolve.
+        m = re.search(r"[_\-]?([A-Za-z0-9]+)\s*$", id_attr)
+        if m:
+            page = _resolve_token(m.group(1))
+            if page is not None:
+                return page
+        return _resolve_token((el.get_text() or "").strip())
+
+    @staticmethod
+    def _is_toc_doc(doc) -> bool:
+        """Detect a Table-of-Contents document. Two signals:
+          - filename contains 'toc' or 'contents' (case-insensitive);
+          - any descendant carries epub:type='toc'.
+        The EPUB3 nav doc is already filtered out by _content_docs()."""
+        rel = (getattr(doc, "rel_path", "") or "").lower()
+        if _TOC_FILE_RE.search(os.path.basename(rel)):
+            return True
+        soup = getattr(doc, "soup", None)
+        if soup is not None and soup.find(attrs={"epub:type": "toc"}):
+            return True
+        return False
+
+    def _build_doc_page_map(self, doc, tag_names) -> Dict[int, Optional[int]]:
+        """Walk an XHTML doc in document order and assign each candidate
+        element (by Python id()) the PDF page that was last announced by a
+        pagebreak marker preceding (or contained within) it.
+
+        Pre-order walk: a marker nested inside a <p> updates `current_page`
+        only after the <p> is first entered, so the straddling <p> keeps the
+        *previous* page. The ±1 tolerance in `_pick_by_page` covers either
+        interpretation of the boundary."""
+        page_for_el: Dict[int, Optional[int]] = {}
+        current_page: Optional[int] = None
+        target = set(tag_names)
+        for el in doc.soup.find_all(True):
+            if (el.get("epub:type") == "pagebreak"
+                    or el.get("role") == "doc-pagebreak"):
+                new_page = self._resolve_pagebreak_page(el)
+                if new_page is not None:
+                    current_page = new_page
+                continue
+            if el.name in target:
+                page_for_el[id(el)] = current_page
+        return page_for_el
+
     def _match_pdf_para(self, epub_text: str) -> Optional[PdfParagraph]:
         res = self._match_pdf_para_aligned(epub_text)
         return res[0] if res else None
 
+    @staticmethod
+    def _pick_by_page(
+        cands: List[Tuple["PdfParagraph", int]],
+        page_hint: Optional[int],
+    ) -> Tuple["PdfParagraph", int]:
+        """Choose the best candidate. When page_hint is given, prefer the
+        candidate closest to that page within a ±1 tolerance; otherwise
+        fall back to the latest-page candidate (chapter-body over TOC)."""
+        if page_hint is not None:
+            near = [c for c in cands if abs(c[0].page - page_hint) <= 1]
+            if near:
+                return min(near, key=lambda c: abs(c[0].page - page_hint))
+        return max(cands, key=lambda c: c[0].page)
+
     def _match_pdf_para_aligned(
-        self, epub_text: str
+        self, epub_text: str, page_hint: Optional[int] = None
     ) -> Optional[Tuple[PdfParagraph, int]]:
         """Find a PDF paragraph matching the EPUB text and return it with
         the *word offset* at which the EPUB text starts inside the PDF
@@ -989,8 +1125,8 @@ class StyleComparator:
         # 1. Exact prefix match.
         matches = self._pdf_by_key.get(key)
         if matches:
-            best = max(matches, key=lambda p: p.page)
-            return (best, 0)
+            prefix_cands = [(p, 0) for p in matches]
+            return self._pick_by_page(prefix_cands, page_hint)
 
         # 2. Word-boundary substring match.
         needle = _normalize(epub_text)
@@ -1008,7 +1144,7 @@ class StyleComparator:
             word_offset = len(_words(norm_text[:idx])) if idx > 0 else 0
             substr_cands.append((para, word_offset))
         if substr_cands:
-            return max(substr_cands, key=lambda t: t[0].page)
+            return self._pick_by_page(substr_cands, page_hint)
         return None
 
 
