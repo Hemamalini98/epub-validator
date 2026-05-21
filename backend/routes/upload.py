@@ -51,12 +51,12 @@ async def upload_zip(file: UploadFile = File(...)):
     return await process_upload(file)
 
 
-@router.get("/files/{folder_name}")
+@router.get("/file-data/{folder_name}")
 def list_files(folder_name: str):
     return get_extract_files(folder_name)
 
 
-@router.get("/files/{folder_name}/{file_path:path}")
+@router.get("/file-data/{folder_name}/{file_path:path}")
 async def get_file_content(folder_name: str, file_path: str):
     base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
     target = (base / file_path).resolve()
@@ -67,7 +67,7 @@ async def get_file_content(folder_name: str, file_path: str):
     return FileResponse(target)
 
 
-@router.put("/files/{folder_name}/{file_path:path}")
+@router.put("/file-data/{folder_name}/{file_path:path}")
 async def save_file_content(folder_name: str, file_path: str, body: SaveFileRequest):
     base = (Path(UPLOAD_DIR) / folder_name / EXTRACT_DIR / "epub").resolve()
     target = (base / file_path).resolve()

@@ -155,7 +155,7 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The API starts at `http://localhost:8000`.
+The API starts at `http://localhost:5002`.
 
 **Production (multiple workers):**
 ```bash
@@ -174,6 +174,30 @@ npm run dev
 The app opens at `http://localhost:5173`. The Vite dev server proxies all API calls to the backend automatically.
 
 ---
+
+## Docker setup 
+
+### Build Containers
+
+```bash
+docker-compose up --build
+```
+### Start Application
+
+```bash
+docker-compose up
+```
+### Access Application
+
+Frontend API
+
+``` bash
+http://localhost:5003
+```
+Backend API
+``` bash
+http://localhost:5002
+```
 
 ## API Endpoints
 

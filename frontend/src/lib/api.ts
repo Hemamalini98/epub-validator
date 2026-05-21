@@ -36,7 +36,7 @@ export async function uploadFile(
 }
 
 export async function getFiles(folderName: string): Promise<FilesResponse> {
-  const { data } = await client.get<FilesResponse>(`/files/${folderName}`);
+  const { data } = await client.get<FilesResponse>(`/file-data/${folderName}`);
   return data;
 }
 
@@ -49,7 +49,7 @@ export async function validateFolder(folderName: string): Promise<ValidationApiR
 
 export async function getFileContent(folderName: string, filePath: string): Promise<string> {
   const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
-  const { data } = await client.get<string>(`/files/${folderName}/${encoded}`, {
+  const { data } = await client.get<string>(`/file-data/${folderName}/${encoded}`, {
     responseType: 'text',
   });
   return data;
@@ -62,7 +62,7 @@ export async function saveFileContent(
 ): Promise<void> {
   const encoded = filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
   try {
-    await client.put(`/files/${folderName}/${encoded}`, { content });
+    await client.put(`/file-data/${folderName}/${encoded}`, { content });
   } catch (err) {
     throw new Error(extractErrorMessage(err));
   }

@@ -2,7 +2,10 @@ import json
 import os
 import threading
 
-BOOKS_FILE = "books.json"
+# Default: books.json in the working directory (local dev).
+# In Docker, set BOOKS_FILE=uploads/books.json so it lives inside the
+# mounted volume alongside the uploads.
+BOOKS_FILE = os.environ.get("BOOKS_FILE", "books.json")
 
 # Single lock shared across all threads in a process.
 # Prevents concurrent uploads from producing a torn books.json.
@@ -20,6 +23,7 @@ def _load() -> list:
 
 
 def _save(books: list) -> None:
+    os.makedirs(os.path.dirname(BOOKS_FILE), exist_ok=True)
     with open(BOOKS_FILE, "w", encoding="utf-8") as f:
         json.dump(books, f, indent=2)
 

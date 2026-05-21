@@ -122,8 +122,41 @@ export default function FilesPage() {
     [filesData],
   );
 
-  // ── Validation state ────────────────────────────────────────────────────────
-  const [validationData, setValidationData] = useState<ValidationApiResponse | null>(null);
+  // ── Validation state (persisted to localStorage per book) ──────────────────
+  const storageKey = `validation:${folderName}`;
+
+  const [validationData, setValidationData] = useState<ValidationApiResponse | null>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved ? (JSON.parse(saved) as ValidationApiResponse) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Sync to localStorage whenever validationData changes.
+  // useEffect always sees the committed state value, so there are no
+  // stale-closure or batching issues that can cause missed writes.
+  useEffect(() => {
+    try {
+      if (validationData === null) {
+        localStorage.removeItem(storageKey);
+      } else {
+        // Remove first so a quota error from the OLD value doesn't block the new write
+        localStorage.removeItem(storageKey);
+        localStorage.setItem(storageKey, JSON.stringify(validationData));
+      }
+    } catch {
+      // QuotaExceededError: evict all other validation entries and retry once
+      try {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith('validation:') && key !== storageKey) localStorage.removeItem(key);
+        }
+        if (validationData !== null) localStorage.setItem(storageKey, JSON.stringify(validationData));
+      } catch { /* truly out of space — silently skip */ }
+    }
+  }, [validationData, storageKey]);
+
   const [isValidating, setIsValidating] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -175,6 +208,12 @@ export default function FilesPage() {
   const handleValidateFile = async (fileName: string) => {
     setValidatingFiles((prev) => new Set(prev).add(fileName));
     setValidationError(null);
+    // Clear stale entries for this file immediately so the modal never
+    // shows old results while the new validation is in flight.
+    setValidationData((prev) => {
+      if (!prev) return prev;
+      return { ...prev, files: prev.files.filter((e) => e.file_details.file_name !== fileName) };
+    });
     try {
       const result = await validateFile(folderName, fileName);
       setValidationData((prev) => mergeValidation(prev, result));
