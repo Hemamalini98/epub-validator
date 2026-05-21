@@ -107,6 +107,25 @@ class NavValidator:
         if not toc_nav:
             return []
 
+        # Precondition: only run when the book actually uses more than one
+        # heading level across its content docs. If every chapter uses a single
+        # level (e.g. all <h1>, with CSS classes carrying the visual hierarchy),
+        # there is no h1–h6 hierarchy to validate and the check would produce
+        # only false positives.
+        levels_used: Set[int] = set()
+        for d in self.epub.xhtml_docs:
+            if self._is_toc_or_nav_doc(d):
+                continue
+            if d.soup is None:
+                continue
+            for tag in d.soup.find_all(re.compile(r"^h[1-6]$")):
+                levels_used.add(int(tag.name[1]))
+        if len(levels_used) <= 1:
+            return [Issue(name="Incorrect Level in NAV", status=Status.PASS,
+                          detail="Skipped: book uses a single heading level "
+                                 "(hierarchy is styled with CSS, not heading tags).",
+                          category="Incorrect Level in NAV")]
+
         # Build {target_href#anchor_or_file: nesting_depth} for every leaf li > a
         target_depth: Dict[str, int] = {}
         for a in toc_nav.find_all("a"):
@@ -124,7 +143,10 @@ class NavValidator:
         pairs: List[Tuple[XhtmlDoc, str, int, int]] = []
         for tgt, depth in target_depth.items():
             doc, anchor = self._find_doc(tgt)
-            if not doc:
+            if not doc or self._is_toc_or_nav_doc(doc):
+                # Skip nav-internal anchors and separate TOC/contents pages —
+                # their "headings" mirror nav entries rather than chapter
+                # structure and would poison the offset/level comparison.
                 continue
             heading = None
             if anchor:
@@ -154,16 +176,28 @@ class NavValidator:
         # Per-document mode offset.
         from collections import Counter
         offsets_by_doc: Dict[str, Counter] = {}
+        levels_by_doc: Dict[str, Set[int]] = {}
         for doc, _txt, level, depth in pairs:
             offsets_by_doc.setdefault(doc.rel_path, Counter())[depth - level] += 1
+            levels_by_doc.setdefault(doc.rel_path, set()).add(level)
 
         doc_offset: Dict[str, int] = {
             rel: counter.most_common(1)[0][0]
             for rel, counter in offsets_by_doc.items()
         }
 
+        # Docs that use only a single heading level (e.g. every heading is
+        # <h1>, with CSS classes carrying the visual hierarchy) carry no
+        # h1/h2/h3 hierarchy to validate against — comparing nav depth to
+        # heading level produces only false positives. Skip them.
+        skip_docs: Set[str] = {
+            rel for rel, lvls in levels_by_doc.items() if len(lvls) <= 1
+        }
+
         problems: List[Tuple[str, str, int, int]] = []
         for doc, txt, level, depth in pairs:
+            if doc.rel_path in skip_docs:
+                continue
             expected = doc_offset.get(doc.rel_path, 0)
             if depth - level != expected:
                 problems.append((doc.rel_path, txt, level, depth))
@@ -245,3 +279,19 @@ class NavValidator:
             if os.path.normpath(d.rel_path) == os.path.normpath(rel):
                 return d, anchor or None
         return None, None
+
+    def _is_toc_or_nav_doc(self, doc: XhtmlDoc) -> bool:
+        """True if doc is the EPUB nav doc or a separate TOC/contents page.
+
+        Identified by being the registered nav doc, by containing a
+        <nav epub:type="toc"> element, or by filename heuristic
+        (toc*.xhtml / contents*.xhtml).
+        """
+        if doc is self.epub.nav_doc:
+            return True
+        if doc.soup is not None and doc.soup.find("nav", attrs={"epub:type": "toc"}):
+            return True
+        name = os.path.basename(doc.rel_path).lower()
+        if "toc" in name or "contents" in name:
+            return True
+        return False

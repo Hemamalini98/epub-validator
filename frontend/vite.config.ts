@@ -13,18 +13,18 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/upload':   {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:5002',
         changeOrigin: true,
         bypass(req) {
           if (req.headers.accept?.includes('text/html')) return '/index.html';
         },
       },
-      '/books':    { target: 'http://127.0.0.1:8000', changeOrigin: true },
-      '/pdf':      { target: 'http://127.0.0.1:8000', changeOrigin: true },
-      '/validate': { target: 'http://127.0.0.1:8000', changeOrigin: true },
-      '/export':   { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/books':    { target: 'http://127.0.0.1:5002', changeOrigin: true },
+      '/pdf':      { target: 'http://127.0.0.1:5002', changeOrigin: true },
+      '/validate': { target: 'http://127.0.0.1:5002', changeOrigin: true },
+      '/export':   { target: 'http://127.0.0.1:5002', changeOrigin: true },
       '/files': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:5002',
         changeOrigin: true,
         bypass(req) {
           // Browser page-refresh sends Accept: text/html — serve the SPA shell.

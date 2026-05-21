@@ -369,7 +369,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
         });
 
         // ── 4. <base> so images/fonts resolve via backend ─────────────────
-        const baseHref = `${window.location.origin}/files/${folderName}/${dir}`;
+        const baseHref = `${window.location.origin}/file-data/${folderName}/${dir}`;
         html = html.replace(/<base\b[^>]*\/?>/gi, '');
         html = html.replace(
           /(<head\b[^>]*>)/i,

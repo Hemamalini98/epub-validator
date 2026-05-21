@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+uploads/
+books.json
+.venv/
+venv/
+.env
+*.egg-info/
