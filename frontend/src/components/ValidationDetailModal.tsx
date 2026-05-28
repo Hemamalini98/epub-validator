@@ -304,6 +304,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
 
   // ── PDF page lookup ───────────────────────────────────────────────────────────
   const [pdfPage, setPdfPage]             = useState<number | null>(null);
+  const [pdfEndPage, setPdfEndPage]       = useState<number | null>(null);
   const [pdfPageLoading, setPdfPageLoading] = useState(false);
 
   useEffect(() => {
@@ -311,8 +312,8 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     if (pdfPage !== null || pdfPageLoading) return;
     setPdfPageLoading(true);
     getPdfPage(folderName, file.file_name)
-      .then(({ page }) => setPdfPage(page))
-      .catch(() => setPdfPage(1))
+      .then(({ page, end_page }) => { setPdfPage(page); setPdfEndPage(end_page); })
+      .catch(() => { setPdfPage(1); setPdfEndPage(1); })
       .finally(() => setPdfPageLoading(false));
   }, [activeTab, folderName, file.file_name, pdfPage, pdfPageLoading]);
 
@@ -702,8 +703,15 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                   >
                     {/* Left: PDF page */}
                     <div className="w-1/2 h-full border-r border-border flex flex-col">
-                      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border bg-muted/30 flex-shrink-0">
-                        PDF
+                      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border bg-muted/30 flex-shrink-0 flex items-center gap-2">
+                        <span>PDF</span>
+                        {pdfPage !== null && pdfEndPage !== null && (
+                          <span className="normal-case font-normal text-muted-foreground/70">
+                            {pdfPage === pdfEndPage
+                              ? `p. ${pdfPage}`
+                              : `pp. ${pdfPage}–${pdfEndPage}`}
+                          </span>
+                        )}
                       </div>
                       {pdfPageLoading && (
                         <div className="flex flex-col items-center justify-center flex-1 gap-2 text-sm text-muted-foreground">
@@ -716,7 +724,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                       )}
                       {!pdfPageLoading && pdfPage !== null && (
                         <iframe
-                          src={`/pdf/${folderName}#page=${pdfPage}&pagemode=none&view=Fit&toolbar=1&navpanes=0`}
+                          src={`/pdf/${folderName}/chapter?file=${encodeURIComponent(file.file_name)}#toolbar=0&navpanes=0&scrollbar=1&pagemode=none&view=FitH`}
                           className="flex-1 w-full border-0"
                           title={`PDF: ${folderName}`}
                         />
