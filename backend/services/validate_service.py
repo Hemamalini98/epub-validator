@@ -781,6 +781,146 @@ def validate_css_w3c(file_details):
 
 
 # =====================================
+# PAGEBREAK POSITION
+# =====================================
+#
+# Checks that each <span epub:type="pagebreak" title="N"> in a chapter is
+# placed at the actual start of PDF page label N. Strategy: collect the
+# first few word tokens that follow each marker in the chapter and confirm
+# they appear as a contiguous substring inside the matching PDF page's text.
+# Substring (rather than prefix) match tolerates running headers / page
+# numbers that PyMuPDF surfaces at the top of the extracted page text.
+
+_PAGEBREAK_WORD_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _pagebreak_normalize(text: str) -> str:
+    if not text:
+        return ""
+    text = text.replace("­", "")  # soft hyphen
+    return " ".join(_PAGEBREAK_WORD_RE.findall(text.lower()))
+
+
+def _pagebreak_collect_segments(soup):
+    """Walk the document and bucket text into segments delimited by pagebreak
+    markers. Returns list of (label_or_None, text). segments[0] is the text
+    before the first marker; each subsequent segment is owned by the
+    preceding marker."""
+    segments = []
+    state = {"label": None, "parts": []}
+
+    def flush(new_label):
+        segments.append((state["label"], "".join(state["parts"])))
+        state["label"] = new_label
+        state["parts"] = []
+
+    def is_pagebreak(el) -> str | None:
+        if not getattr(el, "name", None):
+            return None
+        if el.get("role") == "doc-pagebreak":
+            return (el.get("title") or el.get("aria-label") or "").strip() or None
+        if "pagebreak" in (el.get("epub:type") or "").lower():
+            return (el.get("title") or el.get("aria-label") or "").strip() or None
+        return None
+
+    def walk(node):
+        for child in getattr(node, "children", []):
+            label = is_pagebreak(child)
+            if label is not None:
+                flush(label)
+                walk(child)
+            elif getattr(child, "name", None):
+                walk(child)
+            else:
+                state["parts"].append(str(child))
+
+    walk(soup.body or soup)
+    segments.append((state["label"], "".join(state["parts"])))
+    return segments
+
+
+def validate_pagebreak_positions(file_details):
+    from services.pdf_service import _pdf_path
+    import pymupdf as fitz
+
+    file_path = file_details["full_path"]
+    folder_name = file_details["folder_name"]
+    issues: list[dict] = []
+
+    pdf_file = _pdf_path(folder_name)
+    if not os.path.exists(pdf_file):
+        return {"issues_count": 0, "issues": []}
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    segments = _pagebreak_collect_segments(soup)
+    # The first segment has label=None (pre-marker text); skip it.
+    labelled = [(label, text) for label, text in segments[1:] if label]
+    if not labelled:
+        return {"issues_count": 0, "issues": []}
+
+    doc = fitz.open(pdf_file)
+    try:
+        for label, text in labelled:
+            try:
+                indices = doc.get_page_numbers(label)
+            except Exception:
+                indices = []
+            if not indices:
+                issues.append({
+                    "type": "pagebreak_label_unknown",
+                    "rule_name": "Pagebreak Position",
+                    "page_label": label,
+                    "message": f"Pagebreak marker title=\"{label}\" has no matching page label in the PDF",
+                    "category": "Warning",
+                })
+                continue
+
+            tokens = _PAGEBREAK_WORD_RE.findall(text.replace("­", "").lower())
+            head_tokens = tokens[:5]
+            if len(head_tokens) < 3:
+                # Too little content to compare reliably (e.g. trailing marker).
+                continue
+
+            pdf_words = _pagebreak_normalize(doc[indices[0]].get_text("text")).split()
+            # Match if at least 3 of the first 5 XHTML tokens appear in the
+            # first 30 PDF tokens in order. Tolerates the inevitable
+            # concatenated-word / hyphenation noise without losing the
+            # signal of an off-by-a-page marker.
+            scan = pdf_words[:30]
+            matched = 0
+            cursor = 0
+            for tok in head_tokens:
+                while cursor < len(scan) and scan[cursor] != tok:
+                    cursor += 1
+                if cursor < len(scan):
+                    matched += 1
+                    cursor += 1
+            if matched >= 3:
+                continue
+
+            xhtml_head = " ".join(head_tokens)
+            pdf_excerpt = " ".join(pdf_words[:24]) if pdf_words else ""
+            issues.append({
+                "type": "pagebreak_position_mismatch",
+                "rule_name": "Pagebreak Position",
+                "page_label": label,
+                "message": (
+                    f"Pagebreak marker for page {label} does not appear at the "
+                    f"start of the matching PDF page"
+                ),
+                "expected_text": pdf_excerpt,
+                "actual_text": xhtml_head,
+                "category": "Warning",
+            })
+    finally:
+        doc.close()
+
+    return {"issues_count": len(issues), "issues": issues}
+
+
+# =====================================
 # LOAD RULES
 # =====================================
 
