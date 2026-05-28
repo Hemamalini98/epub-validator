@@ -14,6 +14,27 @@ def _find_xhtml_path(folder_name: str, xhtml_filename: str) -> str | None:
     return None
 
 
+def _extract_first_pagebreak_label(xhtml_path: str) -> str | None:
+    """Return the printed page label of the first epub pagebreak marker in
+    the XHTML, or None if there is no marker."""
+    with open(xhtml_path, "r", encoding="utf-8") as f:
+        soup = BeautifulSoup(f.read(), "html.parser")
+
+    candidates = soup.find_all(attrs={"role": "doc-pagebreak"})
+    if not candidates:
+        # Fallback: any element with epub:type containing "pagebreak"
+        candidates = [
+            el for el in soup.find_all(True)
+            if "pagebreak" in (el.get("epub:type") or "").lower()
+        ]
+
+    for el in candidates:
+        label = el.get("title") or el.get("aria-label")
+        if label:
+            return str(label).strip()
+    return None
+
+
 def _extract_heading(xhtml_path: str) -> str | None:
 
     with open(xhtml_path, "r", encoding="utf-8") as f:
@@ -143,6 +164,19 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
             "page": 1,
             "total_pages": total
         }
+
+    # Prefer EPUB pagebreak markers → PDF page labels. Falls back to heading
+    # text matching when the XHTML has no marker or the label is not in the PDF.
+    label = _extract_first_pagebreak_label(xhtml_path)
+    if label:
+        try:
+            indices = doc.get_page_numbers(label)
+        except Exception:
+            indices = []
+        if indices:
+            page_num = indices[0] + 1
+            doc.close()
+            return {"page": page_num, "total_pages": total}
 
     heading = _extract_heading(xhtml_path)
 
