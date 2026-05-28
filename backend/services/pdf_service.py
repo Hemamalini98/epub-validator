@@ -80,18 +80,45 @@ def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
 
         pages = _extract_pagebreaks(xhtml_path)
 
+
+        start_page = None
+        end_page = None
+
         if pages:
-            start_page = pages[0] if pages else 1
-            end_page   = pages[-1] if pages else 1
+
             for page in doc:
-                if page.get_label() == pages[0]:
+
+                label = page.get_label()
+
+                if label == pages[0]:
                     start_page = page.number + 1
-                if page.get_label() == pages[-1]:
+
+                if label == pages[-1]:
                     end_page = page.number + 1
+
             doc.close()
-            return {"page": start_page, "end_page": end_page, "total_pages": total}
-        else:
-            return {"page": 1, "end_page": total, "total_pages": total}
+
+            if start_page is not None and end_page is not None:
+
+                return {
+                    "page": start_page,
+                    "end_page": end_page,
+                    "total_pages": total
+                }
+
+            return {
+                "page": 1,
+                "end_page": total,
+                "total_pages": total
+            }
+
+        return {
+                "page": 1,
+                "end_page": total,
+                "total_pages": total
+            }
+
+
             
 
 def get_chapter_pdf(folder_name: str, xhtml_filename: str) -> str:
