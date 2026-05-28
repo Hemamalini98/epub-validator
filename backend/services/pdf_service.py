@@ -1,9 +1,33 @@
+import glob
 import os
 import pymupdf as fitz
 from bs4 import BeautifulSoup
 
+
 UPLOAD_DIR = "uploads"
 EXTRACT_DIR = "extract"
+
+
+def _check_chapter_cache(folder_name: str, xhtml_filename: str):
+    """Look for a previously cut chapter PDF named ``{stem}_pg-{start}-{end}.pdf``.
+
+    Returns ``(path, start, end)`` on hit, ``None`` on miss.
+    """
+    stem        = os.path.splitext(xhtml_filename)[0]
+    extract_dir = os.path.join(UPLOAD_DIR, folder_name, EXTRACT_DIR)
+    matches     = glob.glob(os.path.join(extract_dir, f"{stem}_pg-*-*.pdf"))
+    if not matches:
+        return None
+    path  = matches[0]
+    fname = os.path.basename(path)                      # 08_Contents_pg-42-45.pdf
+    pg    = fname[len(stem) + 4:-4]                     # "42-45"
+    parts = pg.split("-")
+    if len(parts) == 2:
+        try:
+            return path, int(parts[0]), int(parts[1])
+        except ValueError:
+            pass
+    return None
 
 
 def _find_xhtml_path(folder_name: str, xhtml_filename: str) -> str | None:
@@ -14,279 +38,102 @@ def _find_xhtml_path(folder_name: str, xhtml_filename: str) -> str | None:
     return None
 
 
-def _extract_first_pagebreak_label(xhtml_path: str) -> str | None:
-    """Return the printed page label of the first epub pagebreak marker in
-    the XHTML, or None if there is no marker."""
+def _extract_pagebreaks(xhtml_path: str) -> list[str]:
+    """Return sorted list of page numbers from epub:type="pagebreak" spans."""
     with open(xhtml_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
 
-    candidates = soup.find_all(attrs={"role": "doc-pagebreak"})
-    if not candidates:
-        # Fallback: any element with epub:type containing "pagebreak"
-        candidates = [
-            el for el in soup.find_all(True)
-            if "pagebreak" in (el.get("epub:type") or "").lower()
-        ]
-
-    for el in candidates:
-        label = el.get("title") or el.get("aria-label")
-        if label:
-            return str(label).strip()
-    return None
-
-
-def _extract_heading(xhtml_path: str) -> str | None:
-
-    with open(xhtml_path, "r", encoding="utf-8") as f:
-
-        soup = BeautifulSoup(
-            f.read(),
-            "html.parser"
-        )
-
-    for tag in ["h1", "h2", "h3", "h4"]:
-
-        el = soup.find(tag)
-
-        if el:
-
-            text = el.get_text()
-
-            if text:
-                return text
-
-    return None
-
+    pages = []
+    for span in soup.find_all("span", {"epub:type": "pagebreak"}):
+        if span.get("epub:type") == "pagebreak" or span.get("role") == "doc-pagebreak":
+            label = span.get("aria-label") or span.get("id", "")
+            # id may be "page_14" — strip prefix
+            label = label.replace("page_", "").strip()
+            try:
+                pages.append(str(label))
+            except ValueError:
+                pass
+    return pages
 
 def _pdf_path(folder_name: str) -> str:
     return os.path.join(UPLOAD_DIR, folder_name, EXTRACT_DIR, f"{folder_name}.pdf")
 
-
-# def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
-#     """Return {page, total_pages} for the PDF page matching the XHTML chapter."""
-#     pdf_file = _pdf_path(folder_name)
-#     if not os.path.exists(pdf_file):
-#         return {"page": 1, "total_pages": 1}
-
-#     doc = fitz.open(pdf_file)
-#     total = len(doc)
-
-#     xhtml_path = _find_xhtml_path(folder_name, xhtml_filename)
-#     if not xhtml_path:
-#         doc.close()
-#         return {"page": 1, "total_pages": total}
-
-#     heading = _extract_heading(xhtml_path)
-#     if not heading:
-#         doc.close()
-#         return {"page": 1, "total_pages": total}
-
-#     heading_norm = " ".join(heading.lower().split())
-#     heading_words = [w for w in heading_norm.split() if len(w) > 2]
-
-#     best_page = 1
-#     best_score = 0.0
-
-#     for i in range(total):
-#         page_text = " ".join(doc[i].get_text("text").lower().split())
-
-#         # Exact match — done
-#         if heading_norm in page_text:
-#             doc.close()
-#             return {"page": i + 1, "total_pages": total}
-
-#         # Word-overlap score
-#         if heading_words:
-#             score = sum(1 for w in heading_words if w in page_text) / len(heading_words)
-#             if score > best_score:
-#                 best_score = score
-#                 best_page = i + 1
-
-#     doc.close()
-#     return {"page": best_page, "total_pages": total}
-
-
-
-
-import os
-import re
-# import fitz
-
-
-def normalize_pdf_text(text):
-
-    text = re.sub(
-        r"[\x00-\x1F\x7F]",
-        "",
-        text
-    )
-
-    text = " ".join(
-        text.split()
-    )
-
-    # remove roman numerals at beginning
-    text = re.sub(
-        r"^[ivxlcdm]+\s+",
-        "",
-        text,
-        flags=re.IGNORECASE
-    )
-
-    return text.strip().lower()
-
-
 def find_pdf_page(folder_name: str, xhtml_filename: str) -> dict:
-
     pdf_file = _pdf_path(folder_name)
 
-    if not os.path.exists(pdf_file):
+    # ── Fast path: page range already encoded in cached filename ────────────
+    cached = _check_chapter_cache(folder_name, xhtml_filename)
+    if cached:
+        _, start, end = cached
+        total = len(fitz.open(pdf_file)) if os.path.exists(pdf_file) else end
+        return {"page": start, "end_page": end, "total_pages": total}
 
-        return {
-            "page": 1,
-            "total_pages": 1
-        }
+    # ── Slow path: parse XHTML pagebreaks and scan PDF labels ───────────────
+    total = 1
+    if os.path.exists(pdf_file):
+        doc = fitz.open(pdf_file)
+        total = len(doc)
 
-    doc = fitz.open(pdf_file)
+        xhtml_path = _find_xhtml_path(folder_name, xhtml_filename)
+        if not xhtml_path:
+            return {"page": 1, "end_page": 1, "total_pages": total}
 
-    total = len(doc)
+        pages = _extract_pagebreaks(xhtml_path)
 
-    xhtml_path = _find_xhtml_path(
-        folder_name,
-        xhtml_filename
-    )
-
-    if not xhtml_path:
-
-        doc.close()
-
-        return {
-            "page": 1,
-            "total_pages": total
-        }
-
-    # Prefer EPUB pagebreak markers → PDF page labels. Falls back to heading
-    # text matching when the XHTML has no marker or the label is not in the PDF.
-    label = _extract_first_pagebreak_label(xhtml_path)
-    if label:
-        try:
-            indices = doc.get_page_numbers(label)
-        except Exception:
-            indices = []
-        if indices:
-            page_num = indices[0] + 1
+        if pages:
+            start_page = pages[0] if pages else 1
+            end_page   = pages[-1] if pages else 1
+            for page in doc:
+                if page.get_label() == pages[0]:
+                    start_page = page.number + 1
+                if page.get_label() == pages[-1]:
+                    end_page = page.number + 1
             doc.close()
-            return {"page": page_num, "total_pages": total}
+            return {"page": start_page, "end_page": end_page, "total_pages": total}
+        else:
+            return {"page": 1, "end_page": total, "total_pages": total}
+            
 
-    heading = _extract_heading(xhtml_path)
+def get_chapter_pdf(folder_name: str, xhtml_filename: str) -> str:
+    """Return path to a chapter-scoped PDF, cutting and caching on first call.
 
-    if not heading:
+    Filename format: ``{stem}_pg-{start}-{end}.pdf``
+    Cache check is a single glob — no XHTML read, no PDF label scan.
+    """
+    # ── Cache hit ────────────────────────────────────────────────────────────
+    cached = _check_chapter_cache(folder_name, xhtml_filename)
+    if cached:
+        return cached[0]
 
-        doc.close()
+    # ── Resolve page range (slow path, runs only once per chapter) ───────────
+    full_pdf = _pdf_path(folder_name)
+    if not os.path.exists(full_pdf):
+        raise FileNotFoundError("Full PDF not found")
 
-        return {
-            "page": 1,
-            "total_pages": total
-        }
+    info  = find_pdf_page(folder_name, xhtml_filename)
+    start = info["page"]
+    end   = info["end_page"]
 
-    heading_norm = normalize_pdf_text(
-        heading
-    )
+    # Full-book chapter — serve original PDF, save a zero-byte marker so the
+    # cache check succeeds on the next call without re-running detection.
+    stem        = os.path.splitext(xhtml_filename)[0]
+    extract_dir = os.path.join(UPLOAD_DIR, folder_name, EXTRACT_DIR)
+    if start == 1 and end == info["total_pages"]:
+        marker = os.path.join(extract_dir, f"{stem}_pg-{start}-{end}.pdf")
+        open(marker, "wb").close()          # zero-byte marker
+        return full_pdf
 
-    heading_words = [
-        w
-        for w in heading_norm.split()
-        if len(w) > 2
-    ]
+    # ── Cut and save ─────────────────────────────────────────────────────────
+    chapter_pdf_path = os.path.join(extract_dir, f"{stem}_pg-{start}-{end}.pdf")
+    src = fitz.open(full_pdf)
+    out = fitz.open()
+    out.insert_pdf(src, from_page=start - 1, to_page=end - 1)
+    out.save(chapter_pdf_path)
+    out.close()
+    src.close()
 
-    best_page = 1
-    best_score = 0.0
+    return chapter_pdf_path
 
-    # =====================================
-    # LOOP PDF PAGES
-    # =====================================
-
-    for i in range(total):
-
-        page = doc[i]
-
-        blocks = page.get_text(
-            "blocks"
-        )
-
-        # =====================================
-        # CHECK TOP BLOCKS FIRST
-        # =====================================
-
-        for block in blocks[:2]:
-
-            block_text = normalize_pdf_text(
-                block[4]
-            )
-
-            # exact heading block match
-            if heading_norm == block_text:
-
-                doc.close()
-
-                return {
-                    "page": i + 1,
-                    "total_pages": total
-                }
-
-            # heading inside block
-            if heading_norm in block_text:
-
-                doc.close()
-
-                return {
-                    "page": i + 1,
-                    "total_pages": total
-                }
-
-        # =====================================
-        # FALLBACK FULL PAGE SEARCH
-        # =====================================
-
-        page_text = normalize_pdf_text(
-            page.get_text("text")
-        )
-
-        # skip TOC pages for normal chapters
-        if (
-            "contents" not in heading_norm
-            and "table of contents" not in heading_norm
-        ):
-
-            if (
-                "table of contents" in page_text
-                or "contents" in page_text
-            ):
-                continue
-
-        # =====================================
-        # WORD SCORE
-        # =====================================
-
-        if heading_words:
-
-            score = sum(
-                1
-                for w in heading_words
-                if w in page_text
-            ) / len(heading_words)
-
-            if score > best_score:
-
-                best_score = score
-                best_page = i + 1
-
-    doc.close()
-
-    return {
-        "page": best_page,
-        "total_pages": total
-    }
 
 def render_pdf_page(folder_name: str, page: int) -> bytes:
     """Render a single PDF page to PNG bytes at 2× resolution."""

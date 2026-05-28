@@ -82,8 +82,8 @@ export async function validateFile(
 export async function getPdfPage(
   folderName: string,
   fileName: string,
-): Promise<{ page: number; total_pages: number }> {
-  const { data } = await client.get<{ page: number; total_pages: number }>(
+): Promise<{ page: number; end_page: number; total_pages: number }> {
+  const { data } = await client.get<{ page: number; end_page: number; total_pages: number }>(
     `/pdf/${folderName}/page`,
     { params: { file: fileName } },
   );

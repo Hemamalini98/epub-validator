@@ -112,13 +112,20 @@ export default function FilesPage() {
     retry: 1,
   });
 
+  const naturalSort = (a: string, b: string) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
   const xhtmlFiles = useMemo(
-    () => (filesData?.files ?? []).filter((f) => f.file_name.toLowerCase().endsWith('.xhtml')),
+    () => (filesData?.files ?? [])
+      .filter((f) => f.file_name.toLowerCase().endsWith('.xhtml'))
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
 
   const cssFiles = useMemo(
-    () => (filesData?.files ?? []).filter((f) => f.file_name.toLowerCase().endsWith('.css')),
+    () => (filesData?.files ?? [])
+      .filter((f) => f.file_name.toLowerCase().endsWith('.css'))
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
     [filesData],
   );
 

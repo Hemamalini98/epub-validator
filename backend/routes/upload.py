@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from services.upload_service import process_upload, get_extract_files, UPLOAD_DIR, EXTRACT_DIR
 from services.validate_service import validate_epub
 from services.books_service import get_all_books, delete_book as delete_book_record
-from services.pdf_service import find_pdf_page, render_pdf_page
+from services.pdf_service import find_pdf_page, render_pdf_page, get_chapter_pdf
 
 router = APIRouter()
 
@@ -95,6 +95,15 @@ async def get_pdf(folder_name: str):
 async def get_pdf_page(folder_name: str, file: str = Query(...)):
     # PyMuPDF is CPU-bound; run in thread so other requests aren't blocked
     return await asyncio.to_thread(find_pdf_page, folder_name, file)
+
+
+@router.get("/pdf/{folder_name}/chapter")
+async def get_chapter_pdf_endpoint(folder_name: str, file: str = Query(...)):
+    try:
+        path = await asyncio.to_thread(get_chapter_pdf, folder_name, file)
+        return FileResponse(path, media_type="application/pdf")
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="PDF not found")
 
 
 @router.get("/pdf/{folder_name}/render")
