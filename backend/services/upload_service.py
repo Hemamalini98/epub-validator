@@ -181,6 +181,8 @@ def get_extract_files(folder_name: str):
                 "path": relative_path
             })
 
+    files_data.sort(key=lambda f: f["path"])
+
     return {
         "status": True,
         "folder": folder_name,

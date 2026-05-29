@@ -32,6 +32,13 @@ export default defineConfig({
           if (req.headers.accept?.includes('text/html')) return '/index.html';
         },
       },
+      '/file-data': {
+        target: 'http://127.0.0.1:5002',
+        changeOrigin: true,
+        bypass(req) {
+          if (req.headers.accept?.includes('text/html')) return '/index.html';
+        },
+      },
     },
   },
 });

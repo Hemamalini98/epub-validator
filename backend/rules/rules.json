@@ -68,6 +68,14 @@
       "function": "validate_pdf_style_parity",
       "scope": "book",
       "enabled": true
+    },
+    {
+      "id": "PAGE001",
+      "name": "Validate Pagebreak Position",
+      "function": "validate_pagebreak_positions",
+      "target_path": "OEBPS/xhtml",
+      "enabled": true,
+      "file_name_pattern": "*.xhtml"
     }
   ]
 }

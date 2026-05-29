@@ -238,7 +238,7 @@ function resolveRelative(filePath: string, href: string): string {
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
 export function ValidationDetailModal({ file, folderName, entries, isRevalidating = false, initialTab = 'result', allowedTabs, onClose, onRevalidate }: Props) {
-  const visibleTabs: Tab[] = allowedTabs ?? ['result', 'preview', 'source', 'pdf'];
+  const visibleTabs: Tab[] = allowedTabs ?? ['result', 'preview', 'source'];
   const [activeTab, setActiveTab]       = useState<Tab>(initialTab);
   const [selectedRuleId, setSelectedRule] = useState<string | null>(null);
 
@@ -304,15 +304,16 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
 
   // ── PDF page lookup ───────────────────────────────────────────────────────────
   const [pdfPage, setPdfPage]             = useState<number | null>(null);
+  const [pdfEndPage, setPdfEndPage]       = useState<number | null>(null);
   const [pdfPageLoading, setPdfPageLoading] = useState(false);
 
   useEffect(() => {
-    if (activeTab !== 'pdf') return;
+    if (activeTab !== 'pdf' && activeTab !== 'preview') return;
     if (pdfPage !== null || pdfPageLoading) return;
     setPdfPageLoading(true);
     getPdfPage(folderName, file.file_name)
-      .then(({ page }) => setPdfPage(page))
-      .catch(() => setPdfPage(1))
+      .then(({ page, end_page }) => { setPdfPage(page); setPdfEndPage(end_page); })
+      .catch(() => { setPdfPage(1); setPdfEndPage(1); })
       .finally(() => setPdfPageLoading(false));
   }, [activeTab, folderName, file.file_name, pdfPage, pdfPageLoading]);
 
@@ -447,7 +448,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
 
       {/* Panel */}
       <motion.div
-        className="relative z-10 w-full max-w-5xl h-[82vh] bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden"
+        className="relative z-10 w-full max-w-[95vw] h-[92vh] bg-card rounded-2xl shadow-2xl border border-border flex flex-col overflow-hidden"
         initial={{ opacity: 0, scale: 0.96, y: 16 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.96, y: 16 }}
@@ -698,32 +699,68 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.12 }}
-                    className="h-full flex flex-col"
+                    className="h-full flex"
                   >
-                    {previewLoading && (
-                      <div className="flex flex-col items-center justify-center flex-1 gap-2 text-sm text-muted-foreground">
-                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                        </svg>
-                        Rendering preview…
+                    {/* Left: PDF page */}
+                    <div className="w-1/2 h-full border-r border-border flex flex-col">
+                      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border bg-muted/30 flex-shrink-0 flex items-center gap-2">
+                        <span>PDF</span>
+                        {pdfPage !== null && pdfEndPage !== null && (
+                          <span className="normal-case font-normal text-muted-foreground/70">
+                            {pdfPage === pdfEndPage
+                              ? `p. ${pdfPage}`
+                              : `pp. ${pdfPage}–${pdfEndPage}`}
+                          </span>
+                        )}
                       </div>
-                    )}
-                    {previewError && (
-                      <div className="flex flex-col items-center justify-center flex-1 text-center px-6 gap-2">
-                        <XCircle className="w-8 h-8 text-red-400" />
-                        <p className="text-sm font-medium text-foreground">Preview failed</p>
-                        <p className="text-xs text-muted-foreground">{previewError}</p>
+                      {pdfPageLoading && (
+                        <div className="flex flex-col items-center justify-center flex-1 gap-2 text-sm text-muted-foreground">
+                          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                          Finding page…
+                        </div>
+                      )}
+                      {!pdfPageLoading && pdfPage !== null && (
+                        <iframe
+                          src={`/pdf/${folderName}/chapter?file=${encodeURIComponent(file.file_name)}#toolbar=0&navpanes=0&scrollbar=1&pagemode=none&view=FitH`}
+                          className="flex-1 w-full border-0"
+                          title={`PDF: ${folderName}`}
+                        />
+                      )}
+                    </div>
+
+                    {/* Right: HTML preview */}
+                    <div className="w-1/2 h-full flex flex-col">
+                      <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-b border-border bg-muted/30 flex-shrink-0">
+                        HTML
                       </div>
-                    )}
-                    {previewUrl && !previewLoading && (
-                      <iframe
-                        src={previewUrl}
-                        className="flex-1 w-full border-0 bg-white"
-                        sandbox="allow-same-origin"
-                        title={`Preview: ${file.file_name}`}
-                      />
-                    )}
+                      {previewLoading && (
+                        <div className="flex flex-col items-center justify-center flex-1 gap-2 text-sm text-muted-foreground">
+                          <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                          </svg>
+                          Rendering preview…
+                        </div>
+                      )}
+                      {previewError && (
+                        <div className="flex flex-col items-center justify-center flex-1 text-center px-6 gap-2">
+                          <XCircle className="w-8 h-8 text-red-400" />
+                          <p className="text-sm font-medium text-foreground">Preview failed</p>
+                          <p className="text-xs text-muted-foreground">{previewError}</p>
+                        </div>
+                      )}
+                      {previewUrl && !previewLoading && (
+                        <iframe
+                          src={previewUrl}
+                          className="flex-1 w-full border-0 bg-white"
+                          sandbox="allow-same-origin"
+                          title={`Preview: ${file.file_name}`}
+                        />
+                      )}
+                    </div>
                   </motion.div>
                 )}
 
@@ -784,34 +821,6 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                     )}
                   </motion.div>
                 )}
-                {activeTab === 'pdf' && (
-                  <motion.div
-                    key="pdf"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.12 }}
-                    className="h-full flex flex-col"
-                  >
-                    {pdfPageLoading && (
-                      <div className="flex flex-col items-center justify-center flex-1 gap-2 text-sm text-muted-foreground">
-                        <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                        </svg>
-                        Finding page…
-                      </div>
-                    )}
-                    {!pdfPageLoading && pdfPage !== null && (
-                      <iframe
-                        src={`/pdf/${folderName}#page=${pdfPage}`}
-                        className="flex-1 w-full border-0"
-                        title={`PDF: ${folderName}`}
-                      />
-                    )}
-                  </motion.div>
-                )}
-
               </AnimatePresence>
             </div>
           </div>
