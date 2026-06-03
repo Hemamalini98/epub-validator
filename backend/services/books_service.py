@@ -23,7 +23,9 @@ def _load() -> list:
 
 
 def _save(books: list) -> None:
-    os.makedirs(os.path.dirname(BOOKS_FILE), exist_ok=True)
+    parent = os.path.dirname(BOOKS_FILE)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     with open(BOOKS_FILE, "w", encoding="utf-8") as f:
         json.dump(books, f, indent=2)
 

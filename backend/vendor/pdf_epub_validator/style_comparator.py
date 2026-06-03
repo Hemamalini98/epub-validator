@@ -569,12 +569,15 @@ class StyleComparator:
                 # can't disambiguate. Skip the whole file.
                 continue
             page_for_el = self._build_doc_page_map(doc, tag_names)
+            doc_range = self._doc_page_range(doc)
             for el in doc.soup.find_all(tag_names):
                 etxt = clean_inline_text(el)
                 if len(etxt) < 10:
                     continue
                 page_hint = page_for_el.get(id(el))
-                match = self._match_pdf_para_aligned(etxt, page_hint=page_hint)
+                match = self._match_pdf_para_aligned(
+                    etxt, page_hint=page_hint, page_range=doc_range,
+                )
                 if not match:
                     continue
                 pdf_para, word_offset = match
@@ -1078,6 +1081,24 @@ class StyleComparator:
                 page_for_el[id(el)] = current_page
         return page_for_el
 
+    def _doc_page_range(self, doc) -> Optional[Tuple[int, int]]:
+        """Min/max PDF pages covered by an XHTML doc, derived from its
+        pagebreak markers. Returned with ±1 tolerance to absorb paragraphs
+        that straddle a chapter boundary in the PDF.
+
+        Returns None when no pagebreaks resolve — caller falls back to
+        whole-PDF matching."""
+        pages: List[int] = []
+        for el in doc.soup.find_all(True):
+            if (el.get("epub:type") == "pagebreak"
+                    or el.get("role") == "doc-pagebreak"):
+                p = self._resolve_pagebreak_page(el)
+                if p is not None:
+                    pages.append(p)
+        if not pages:
+            return None
+        return (min(pages) - 1, max(pages) + 1)
+
     def _match_pdf_para(self, epub_text: str) -> Optional[PdfParagraph]:
         res = self._match_pdf_para_aligned(epub_text)
         return res[0] if res else None
@@ -1097,7 +1118,9 @@ class StyleComparator:
         return max(cands, key=lambda c: c[0].page)
 
     def _match_pdf_para_aligned(
-        self, epub_text: str, page_hint: Optional[int] = None
+        self, epub_text: str,
+        page_hint: Optional[int] = None,
+        page_range: Optional[Tuple[int, int]] = None,
     ) -> Optional[Tuple[PdfParagraph, int]]:
         """Find a PDF paragraph matching the EPUB text and return it with
         the *word offset* at which the EPUB text starts inside the PDF
@@ -1117,16 +1140,25 @@ class StyleComparator:
         page: chapter titles appear in the PDF TOC near the front of the
         document, then again in the chapter body — and the chapter body
         is what should be compared.
+
+        ``page_range`` is a hard filter: when supplied, only PDF paragraphs
+        whose ``page`` falls inside the inclusive range are considered.
+        Used by case-checking to scope the search to the chapter's own PDF
+        pages so a stray match in the TOC or another chapter can't win.
         """
         key = _normalize(epub_text)[:80]
         if not key:
             return None
 
+        def _in_range(p: PdfParagraph) -> bool:
+            return page_range is None or page_range[0] <= p.page <= page_range[1]
+
         # 1. Exact prefix match.
         matches = self._pdf_by_key.get(key)
         if matches:
-            prefix_cands = [(p, 0) for p in matches]
-            return self._pick_by_page(prefix_cands, page_hint)
+            prefix_cands = [(p, 0) for p in matches if _in_range(p)]
+            if prefix_cands:
+                return self._pick_by_page(prefix_cands, page_hint)
 
         # 2. Word-boundary substring match.
         needle = _normalize(epub_text)
@@ -1134,6 +1166,8 @@ class StyleComparator:
             return None
         substr_cands: List[Tuple[PdfParagraph, int]] = []
         for norm_text, para in self._pdf_norm_index:
+            if not _in_range(para):
+                continue
             idx = _find_at_word_boundary(norm_text, needle)
             if idx < 0:
                 continue
