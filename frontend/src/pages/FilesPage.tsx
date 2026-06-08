@@ -129,6 +129,13 @@ export default function FilesPage() {
     [filesData],
   );
 
+  const ncxFiles = useMemo(
+    () => (filesData?.files ?? [])
+      .filter((f) => f.file_name.toLowerCase().endsWith('.ncx'))
+      .sort((a, b) => naturalSort(a.file_name, b.file_name)),
+    [filesData],
+  );
+
   // ── Validation state (persisted to localStorage per book) ──────────────────
   const storageKey = `validation:${folderName}`;
 
@@ -263,9 +270,10 @@ export default function FilesPage() {
 
   // ── Summary stats ───────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const total = xhtmlFiles.length;
+    const allFiles = [...xhtmlFiles, ...ncxFiles];
+    const total = allFiles.length;
     let passed = 0, warnings = 0, failed = 0, pending = 0;
-    for (const f of xhtmlFiles) {
+    for (const f of allFiles) {
       const agg = fileIssues.get(f.file_name);
       if (agg === undefined) { pending++; continue; }
       if (agg.errors === 0 && agg.warnings === 0) passed++;
@@ -273,7 +281,7 @@ export default function FilesPage() {
       else warnings++;
     }
     return { total, passed, warnings, failed, pending };
-  }, [xhtmlFiles, fileIssues]);
+  }, [xhtmlFiles, ncxFiles, fileIssues]);
 
   const hasValidated = validationData !== null;
 
@@ -362,7 +370,7 @@ export default function FilesPage() {
           allowedTabs={modalAllowedTabs}
           onClose={() => setSelectedFile(null)}
           onRevalidate={
-            modalAllowedTabs === undefined || selectedFile.file_name.endsWith('.css')
+            !modalAllowedTabs || modalAllowedTabs.includes('result')
               ? () => handleValidateFile(selectedFile.file_name)
               : undefined
           }
@@ -456,7 +464,7 @@ export default function FilesPage() {
                   <>
                     <span className="font-mono text-xs">{folderName}</span>
                     <span className="text-border">·</span>
-                    <span>{stats.total} chapters</span>
+                    <span>{xhtmlFiles.length} chapters</span>
                     <span className="text-border">·</span>
                     <span>{formatDate(book.uploaded_at)}</span>
                   </>
@@ -643,6 +651,25 @@ export default function FilesPage() {
                     onValidate={() => handleValidateFile(file.file_name)}
                     onOpen={() => { setModalAllowedTabs(undefined); setModalInitialTab('result'); setSelectedFile(file); }}
                     onPreview={() => { setModalAllowedTabs(undefined); setModalInitialTab('preview'); setSelectedFile(file); }}
+                    index={i}
+                  />
+                </motion.div>
+              );
+            })}
+            {(activeFilter ? ncxFiles.filter((f) => getFileStatus(f.file_name) === activeFilter) : ncxFiles).map((file, i) => {
+              const status = getFileStatus(file.file_name);
+              const agg = fileIssues.get(file.file_name);
+              return (
+                <motion.div key={`ncx-${file.file_name}-${i}`} variants={xhtmlCardVariants}>
+                  <XHTMLCard
+                    file={file}
+                    status={status}
+                    errors={agg?.errors ?? 0}
+                    warnings={agg?.warnings ?? 0}
+                    isValidating={validatingFiles.has(file.file_name)}
+                    onValidate={() => handleValidateFile(file.file_name)}
+                    onPreview={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
+                    onOpen={() => { setModalAllowedTabs(['result', 'source']); setModalInitialTab('result'); setSelectedFile(file); }}
                     index={i}
                   />
                 </motion.div>

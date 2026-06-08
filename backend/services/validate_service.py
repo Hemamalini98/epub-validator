@@ -322,23 +322,42 @@ def validate_internal_xhtml_links(file_details):
 
         href = link["href"].strip()
 
-        if not href.endswith(".xhtml"):
+        if not href.split("#")[0].endswith(".xhtml"):
             continue
-
+        # Split file path and anchor
+        parts = href.split("#")
+        file_name = parts[0]
+        anchor = parts[1] if len(parts) > 1 else None
         current_dir = os.path.dirname(file_path)
-
         target_file = os.path.normpath(
-            os.path.join(current_dir, href)
+            os.path.join(current_dir, file_name)
         )
 
         if not os.path.exists(target_file):
 
             issues.append({
+                "rule_name": "Missing Internal File",
                 "type": "missing_internal_file",
                 "href": href,
                 "message": "Referenced XHTML file not found",
                 "category":"Error"
             })
+            continue
+
+        # Check anchor exists
+        if anchor:
+            with open(target_file, "r", encoding="utf-8") as f:
+                soup = BeautifulSoup(f, "html.parser")
+            element = soup.find(id=anchor)
+            if not element:
+                issues.append({
+                    "rule_name": "Missing Anchor",
+                    "type": "missing_anchor",
+                    "href": href,
+                    "message": "Referenced anchor not found in target file",
+                    "category": "Error"
+                })
+               
 
     return {
         "issues_count": len(issues),
@@ -459,20 +478,44 @@ def validate_url_text_match(file_details):
         "issues": issues
     }
 
+def get_nav_level(link_tag):
+    level = 0
+    parent = link_tag.parent
+    while parent:
+        if parent.name == "ol":
+            level += 1
+        parent = parent.parent
+    return level
+
 def validate_nav_headings(file_details):
     file_path = file_details["full_path"]
     issues = []
     with open(file_path, "r", encoding="utf-8") as f:
         soup = BeautifulSoup(f.read(), "html.parser")
     nav = soup.find("nav", id="toc")
+    if not nav:
+        issues.append({
+            "rule_name": "Missing TOC Nav",
+            "type": "missing_nav",
+            "message": "TOC nav not found",
+            "category": "Error"
+        })
+        return {
+            "issues_count": len(issues),
+            "issues": issues
+        }
+    # Track heading level by nav level
+    nav_heading_map = {}
     nav_links = nav.find_all("a", href=True)
     for link in nav_links:
         href = link["href"].strip()
-        nav_text = link.get_text(strip=True)
-        # skip external urls
-        if href.startswith("http"):
-            continue
-        # split file and id
+        nav_text = " ".join(
+            link.get_text(strip=True).split()
+        )
+        nav_level = get_nav_level(link)
+        # =====================================
+        # SPLIT FILE / ID
+        # =====================================
         if "#" in href:
             chapter_file, target_id = href.split("#", 1)
         else:
@@ -487,14 +530,12 @@ def validate_nav_headings(file_details):
         # =====================================
         if not os.path.exists(target_file_path):
             issues.append({
+                "rule_name": "Missing Referenced File",
                 "type": "missing_file",
                 "href": href,
                 "message": "Referenced file not found",
-                "category":"Error"
+                "category": "Error"
             })
-            continue
-        # no id skip heading check
-        if not target_id:
             continue
         # =====================================
         # OPEN TARGET XHTML
@@ -508,23 +549,48 @@ def validate_nav_headings(file_details):
                 chapter.read(),
                 "html.parser"
             )
-        target_element = chapter_soup.find(
-            id=target_id
-        )
         # =====================================
-        # ID EXISTS
+        # FIND TARGET ELEMENT
         # =====================================
-        if not target_element:
-            issues.append({
-                "type": "missing_id",
-                "href": href,
-                "id": target_id,
-                "message": "Target id not found",
-                "category":"Error"
-            })
-            continue
+
+        if target_id:
+            target_element = chapter_soup.find(
+                id=target_id
+            )
+            if not target_element:
+                issues.append({
+                    "rule_name": "Missing Anchor ID",
+                    "type": "missing_id",
+                    "href": href,
+                    "id": target_id,
+                    "message": "Target id not found",
+                    "category": "Error"
+                })
+                continue
+
+        else:
+            # Use first heading if no anchor
+            target_element = chapter_soup.find([
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+            ])
+
+            if not target_element:
+                issues.append({
+                    "rule_name": "Missing Heading",
+                    "type": "missing_heading",
+                    "href": href,
+                    "message": "No heading found in chapter",
+                    "category": "Warning"
+                })
+                continue
+
         # =====================================
-        # MOVE TO HEADING TAG
+        # MOVE TO HEADING
         # =====================================
         heading_tags = [
             "h1",
@@ -532,64 +598,227 @@ def validate_nav_headings(file_details):
             "h3",
             "h4",
             "h5",
-            "h6",
-            "p"
+            "h6"
+        ]
+        heading_classes = [
+            "CASE_H1",
+            "CASE_H2",
+            "CASE_H3",
+            "CASE_H4",
+            "CASE_H5",
+            "CASE_H6",
+            "MCQH"
         ]
         current_element = target_element
         while current_element:
-            if current_element.name in heading_tags:
+            current_classes = current_element.get("class",[])
+            if (current_element.name in heading_tags or any(cls in heading_classes for cls in current_classes)):
                 break
             current_element = current_element.parent
         # =====================================
-        # HEADING TAG NOT FOUND
+        # HEADING NOT FOUND
         # =====================================
         if not current_element:
             issues.append({
-                "type": "heading_tag_not_found",
+                "rule_name": "Heading Tag Not Found",
+                "type": "heading_not_found",
                 "href": href,
-                "id": target_id,
-                "message": "Heading tag not found",
-                "category":"Warning"
+                "message": f'"{nav_text}" not in heading tags(h1-h6) or classes({", ".join(heading_classes)}). Heading hierarchy not checked.',
+                "category": "Warning"
             })
             continue
         # =====================================
         # HEADING TEXT
         # =====================================
-        if current_element:
-            heading_text = current_element.get_text(
-                separator=" ",
-                strip=True
+        heading_text =current_element.get_text(
+                separator="",
             )
-            heading_text = " ".join(
-                heading_text.split()
-            )
-        else:
-            heading_text = ""
         # =====================================
         # TEXT MATCH
         # =====================================
         if nav_text.lower() != heading_text.lower():
             issues.append({
-                "type": "heading_mismatch",
+                "rule_name": "Heading Text Mismatch",
+                "type": "heading_text_mismatch",
                 "href": href,
                 "expected_text": nav_text,
                 "actual_text": heading_text,
                 "message": "Nav text and heading text mismatch",
-                "category":"Error"
+                "category": "Error"
             })
         elif nav_text != heading_text:
             issues.append({
-                "type": "heading_mismatch",
+                "rule_name": "Heading Case Mismatch",
+                "type": "heading_case_mismatch",
                 "href": href,
                 "expected_text": nav_text,
                 "actual_text": heading_text,
-                "message": "Nav text and heading text case mismatch",
-                "category":"Warning"
+                "message": "Case mismatch",
+                "category": "Warning"
+            })
+
+        # =====================================
+        # HEADING LEVEL
+        # =====================================
+        if current_element.name in heading_tags:
+            heading_level = int(
+                current_element.name[1]
+            )
+            # Store current nav level
+            nav_heading_map[nav_level] = heading_level
+            # =====================================
+            # HIERARCHY VALIDATION
+            # =====================================
+            # Store heading levels per file
+            if "file_heading_map" not in locals():
+                file_heading_map = {}
+            if chapter_file not in file_heading_map:
+                file_heading_map[chapter_file] = {}
+            parent_nav_level = nav_level - 1
+            # Validate only within same file
+            if (
+                parent_nav_level in file_heading_map[
+                    chapter_file
+                ]
+                ):
+                parent_heading_level = (
+                    file_heading_map[chapter_file][
+                        parent_nav_level
+                    ]
+                )
+                # Child heading must be deeper
+                if heading_level <= parent_heading_level:
+                    issues.append({
+                        "rule_name": "Nav Hierarchy Mismatch",
+                        "type": "hierarchy_mismatch",
+                        "href": href,
+                        "message": (
+                            f'"{heading_text}" heading hierarchy does not match chapter heading level.\n'
+                            f'Navigation level: h{nav_level-1} '
+                            f'Chapter heading level: h{heading_level}\n'
+                        ),
+                        "category": "Error"
+                    })
+
+            # Store current level
+            file_heading_map[chapter_file][
+                nav_level
+            ] = heading_level
+        else:
+            issues.append({
+                "rule_name": "Nav Hierarchy Mismatch",
+                "type": "nav_hierarchy_mismatch",
+                "href": href,
+                "message": f'"{nav_text}" is not a heading tag. Found "{current_element.name}" with classes {current_element.get("class") if current_element.get("class") else "None"}. Heading hierarchy not checked.',
+                "category": "Warning"
             })
     return {
         "issues_count": len(issues),
         "issues": issues
     }
+
+def validate_ncx_headings(file_details):
+    file_path = file_details["full_path"]
+    issues = []
+    current_dir = os.path.dirname(file_path)
+    # Read files
+    with open(file_path, "r", encoding="utf-8") as f:
+        ncx_soup = BeautifulSoup(f, "xml")
+
+    with open(os.path.join(current_dir, "nav.xhtml"), "r", encoding="utf-8") as f:
+        nav_soup = BeautifulSoup(f, "html.parser")
+
+    # Extract NCX entries
+    ncx_items = []
+
+    for navpoint in ncx_soup.find_all("navPoint"):
+
+        text_tag = navpoint.find("text")
+        content_tag = navpoint.find("content")
+
+        title = text_tag.get_text(strip=True) if text_tag else ""
+        href = content_tag.get("src", "").strip() if content_tag else ""
+
+        ncx_items.append({
+            "title": title,
+            "href": href
+        })
+
+    # Extract NAV entries
+    nav_items = []
+
+    toc_nav = nav_soup.find("nav", {"epub:type": "toc"})
+
+    if toc_nav:
+
+        for a in toc_nav.find_all("a"):
+
+            title = a.get_text(strip=True)
+            href = a.get("href", "").strip()
+
+            nav_items.append({
+                "title": title,
+                "href": href
+            })
+
+    # Compare counts
+    if len(ncx_items) != len(nav_items):
+
+        issues.append({
+            "type": "toc_count_mismatch",
+            "message": f"NCX has {len(ncx_items)} items but NAV has {len(nav_items)} items",
+            "category": "Error"
+        })
+        return {"issues_count": len(issues), "issues": issues}
+
+
+    # Compare item by item
+    for i in range(len(ncx_items)):
+        ncx_item = ncx_items[i]
+        nav_item = nav_items[i]
+
+        ncx_title = ncx_item["title"]
+        nav_title = nav_item["title"]
+        ncx_href  = ncx_item["href"]
+        nav_href  = nav_item["href"]
+
+        # ── Title checks ──────────────────────────────────────────────────────
+        if ncx_title.lower() != nav_title.lower():
+            issues.append({
+                "rule_name": "TOC Text Mismatch",
+                "type": "toc_text_mismatch",
+                "href": ncx_href,
+                "expected_text": ncx_title,
+                "actual_text": nav_title,
+                "message": "NCX and NAV title text do not match",
+                "category": "Error",
+            })
+        elif ncx_title != nav_title:
+            issues.append({
+                "rule_name": "TOC Case Mismatch",
+                "type": "toc_case_mismatch",
+                "href": ncx_href,
+                "expected_text": ncx_title,
+                "actual_text": nav_title,
+                "message": "NCX and NAV title casing does not match",
+                "category": "Warning",
+            })
+
+        # ── File mapping check (compare path before any # fragment) ──────────
+        ncx_file = ncx_href.split("#")[0]
+        nav_file = nav_href.split("#")[0]
+        if ncx_file != nav_file:
+            issues.append({
+                "rule_name": "TOC File Mismatch",
+                "type": "toc_file_mismatch",
+                "href": ncx_href,
+                "expected_text": ncx_href,
+                "actual_text": nav_href,
+                "message": "NCX and NAV file mapping does not match",
+                "category": "Error",
+            })
+
+    return {"issues_count": len(issues), "issues": issues}
 # =====================================
 # W3C CSS VALIDATOR
 # =====================================

@@ -567,7 +567,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
             </div>
 
             {/* Overall score */}
-            <div className="px-4 py-3 border-t border-border flex-shrink-0">
+            {/* <div className="px-4 py-3 border-t border-border flex-shrink-0">
               <div className="flex items-center justify-between mb-1.5">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Overall score
@@ -584,7 +584,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                   transition={{ duration: 0.7, ease: 'easeOut', delay: 0.15 }}
                 />
               </div>
-            </div>
+            </div> */}
           </div>
           )}
 
