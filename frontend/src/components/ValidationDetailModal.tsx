@@ -399,11 +399,11 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
     [entries],
   );
 
-  const score = useMemo(() => {
-    if (entries.length === 0) return 0;
-    const passed = entries.filter(e => e.result.issues.length === 0).length;
-    return Math.round((passed / entries.length) * 100);
-  }, [entries]);
+  // const score = useMemo(() => {
+  //   if (entries.length === 0) return 0;
+  //   const passed = entries.filter(e => e.result.issues.length === 0).length;
+  //   return Math.round((passed / entries.length) * 100);
+  // }, [entries]);
 
   const [issueFilter, setIssueFilter] = useState<'all' | 'error' | 'warning'>('all');
   const [ruleNameFilter, setRuleNameFilter] = useState<string | null>(null);
@@ -432,8 +432,8 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
   const errorCount   = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() === 'error').length,   [allIssues]);
   const warningCount = useMemo(() => allIssues.filter(i => (i.category ?? '').toLowerCase() !== 'error').length, [allIssues]);
 
-  const scoreColor   = score >= 80 ? 'text-emerald-600' : score >= 60 ? 'text-amber-600' : 'text-red-600';
-  const scoreBarColor = score >= 80 ? 'bg-emerald-500'  : score >= 60 ? 'bg-amber-500'  : 'bg-red-500';
+  // const scoreColor   = score >= 80 ? 'text-emerald-600' : score >= 60 ? 'text-amber-600' : 'text-red-600';
+  // const scoreBarColor = score >= 80 ? 'bg-emerald-500'  : score >= 60 ? 'bg-amber-500'  : 'bg-red-500';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -567,7 +567,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
             </div>
 
             {/* Overall score */}
-            <div className="px-4 py-3 border-t border-border flex-shrink-0">
+            {/* <div className="px-4 py-3 border-t border-border flex-shrink-0">
               <div className="flex items-center justify-between mb-1.5">
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Overall score
@@ -584,7 +584,7 @@ export function ValidationDetailModal({ file, folderName, entries, isRevalidatin
                   transition={{ duration: 0.7, ease: 'easeOut', delay: 0.15 }}
                 />
               </div>
-            </div>
+            </div> */}
           </div>
           )}
 
